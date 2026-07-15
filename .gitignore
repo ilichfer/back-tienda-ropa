@@ -1,0 +1,14 @@
+target/
+*.jar
+*.war
+.classpath
+.project
+.settings/
+.idea/
+*.iml
+.vscode/
+.env
+.env.local
+.DS_Store
+Thumbs.db
+*.swp
