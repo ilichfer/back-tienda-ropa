@@ -1,0 +1,39 @@
+spring:
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/tiendaropa}
+    username: ${SPRING_DATASOURCE_USERNAME:tiendaropa}
+    password: ${SPRING_DATASOURCE_PASSWORD:Ifv.891123}
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+  flyway:
+    enabled: false
+  jpa:
+    hibernate:
+      ddl-auto: none
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        jdbc:
+          lob:
+            non_contextual_creation: true
+    defer-datasource-initialization: true
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:schema.sql
+      separator: "//"
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+    default-property-inclusion: non_null
+
+server:
+  port: 8080
+
+whatsapp:
+  phone-number-id: ${WHATSAPP_PHONE_NUMBER_ID:1046206528570803}
+  access-token: ${WHATSAPP_ACCESS_TOKEN:EAAWQBFVu9l...}
+  verify-token: ${WHATSAPP_VERIFY_TOKEN:jireh_webhook_2025}
+  business-account-id: ${WHATSAPP_BUSINESS_ACCOUNT_ID:1676627570373964}
