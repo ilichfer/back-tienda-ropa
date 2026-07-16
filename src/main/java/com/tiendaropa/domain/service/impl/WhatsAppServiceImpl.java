@@ -11,6 +11,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Map;
 
 @Service
@@ -56,15 +58,21 @@ public class WhatsAppServiceImpl implements WhatsAppService {
                     .build());
 
             if (cliente == null) {
-                enviarMensaje(from, """
-                    ¡Hola! 👗 Bienvenida a nuestra tienda.
+                var ultimaSalida = mensajeRepo.findFirstByWhatsappFromAndDireccionOrderByCreatedAtDesc(from, "SALIDA");
+                var horas = ultimaSalida
+                    .map(m -> ChronoUnit.HOURS.between(m.getCreatedAt(), Instant.now()))
+                    .orElse(99L);
+                if (horas >= 36) {
+                    enviarMensaje(from, """
+                        ¡Hola! 👗 Bienvenida a nuestra tienda.
 
-                    Para apartar una prenda necesito:
-                    1. Nombre completo
-                    2. Ciudad
-                    3. Dirección de envío
+                        Para apartar una prenda necesito:
+                        1. Nombre completo
+                        2. Ciudad
+                        3. Dirección de envío
 
-                    ¿Cuál prenda te interesa?""");
+                        ¿Cuál prenda te interesa?""");
+                }
             }
 
         } catch (Exception e) {
@@ -81,23 +89,26 @@ public class WhatsAppServiceImpl implements WhatsAppService {
             "text", Map.of("body", texto)
         );
 
-        whatsappWebClient.post()
-            .uri("/{phoneId}/messages", phoneNumberId)
-            .header("Authorization", "Bearer " + accessToken)
-            .bodyValue(body)
-            .retrieve()
-            .bodyToMono(JsonNode.class)
-            .doOnSuccess(r -> {
-                mensajeRepo.save(WaMensaje.builder()
-                        .whatsappFrom(destinatario)
-                        .contenido(texto)
-                        .tipo("text")
-                        .direccion("SALIDA")
-                        .waMessageId(r.get("messages").get(0).get("id").asText())
-                        .build());
-            })
-            .doOnError(e -> log.error("Error enviando WA a {}", destinatario, e))
-            .subscribe();
+        try {
+            var r = whatsappWebClient.post()
+                .uri("/{phoneId}/messages", phoneNumberId)
+                .header("Authorization", "Bearer " + accessToken)
+                .bodyValue(body)
+                .retrieve()
+                .bodyToMono(JsonNode.class)
+                .block();
+
+            mensajeRepo.save(WaMensaje.builder()
+                    .whatsappFrom(destinatario)
+                    .contenido(texto)
+                    .tipo("text")
+                    .direccion("SALIDA")
+                    .waMessageId(r.get("messages").get(0).get("id").asText())
+                    .build());
+        } catch (Exception e) {
+            log.error("Error enviando WA a {}", destinatario, e);
+            throw new RuntimeException("Error enviando mensaje WhatsApp: " + e.getMessage(), e);
+        }
     }
 
     @Override

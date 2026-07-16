@@ -2,10 +2,12 @@ package com.tiendaropa.web.controller;
 
 import com.tiendaropa.domain.model.WaMensaje;
 import com.tiendaropa.domain.repository.WaMensajeRepository;
+import com.tiendaropa.domain.service.WhatsAppService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/wa-mensajes")
@@ -13,6 +15,7 @@ import java.util.List;
 public class WaMensajeController {
 
     private final WaMensajeRepository waMensajeRepo;
+    private final WhatsAppService whatsAppService;
 
     @GetMapping
     public List<WaMensaje> listar(@RequestParam(required = false) String whatsapp) {
@@ -20,5 +23,14 @@ public class WaMensajeController {
             return waMensajeRepo.findByWhatsappFromOrderByCreatedAtDesc(whatsapp);
         }
         return waMensajeRepo.findAll();
+    }
+
+    @PostMapping("/enviar")
+    public void enviar(@RequestBody Map<String, String> body) {
+        var to = body.get("to");
+        if (to == null || to.isBlank()) throw new IllegalArgumentException("'to' es requerido");
+        var texto = body.get("texto");
+        if (texto == null || texto.isBlank()) throw new IllegalArgumentException("'texto' es requerido");
+        whatsAppService.enviarMensaje(to, texto);
     }
 }
