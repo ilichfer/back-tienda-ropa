@@ -1,0 +1,2 @@
+Error: Could not find or load main class com.tiendaropa.TiendaRopaApplication
+Caused by: java.lang.ClassNotFoundException: com.tiendaropa.TiendaRopaApplication
