@@ -1,0 +1,25 @@
+name: Deploy
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy
+        run: |
+          set -e
+          cd /opt/sistema-ropa/backend && git pull
+          cd /opt/sistema-ropa/frontend && git pull
+          cd /opt/sistema-ropa/infra && git pull
+
+          cd /opt/sistema-ropa/frontend
+          npm ci && npm run build
+          rm -rf /var/www/ropa.anunciaig.com/*
+          cp -r dist/* /var/www/ropa.anunciaig.com/
+
+          cd /opt/sistema-ropa/infra
+          docker compose up -d --build
