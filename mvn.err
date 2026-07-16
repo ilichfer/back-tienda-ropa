@@ -1,0 +1,2 @@
+Error: Could not find or load main class Files\JetBrains\IntelliJ
+Caused by: java.lang.ClassNotFoundException: Files\JetBrains\IntelliJ

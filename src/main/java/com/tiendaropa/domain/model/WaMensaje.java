@@ -34,6 +34,12 @@ public class WaMensaje {
     @Column(length = 120)
     private String waMessageId;
 
+    @Column(length = 255)
+    private String mediaId;
+
+    @Column(length = 80)
+    private String mimeType;
+
     @Column(insertable = false, updatable = false)
     private Instant createdAt;
 }
