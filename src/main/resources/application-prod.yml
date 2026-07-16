@@ -1,0 +1,11 @@
+spring:
+  datasource:
+    url: ${SPRING_DATASOURCE_URL}
+    username: ${SPRING_DATASOURCE_USERNAME}
+    password: ${SPRING_DATASOURCE_PASSWORD}
+
+whatsapp:
+  phone-number-id: ${WHATSAPP_PHONE_NUMBER_ID}
+  access-token: ${WHATSAPP_ACCESS_TOKEN}
+  verify-token: ${WHATSAPP_VERIFY_TOKEN}
+  business-account-id: ${WHATSAPP_BUSINESS_ACCOUNT_ID}

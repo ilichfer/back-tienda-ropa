@@ -31,9 +31,3 @@ spring:
 
 server:
   port: 8080
-
-whatsapp:
-  phone-number-id: ${WHATSAPP_PHONE_NUMBER_ID:1046206528570803}
-  access-token: ${WHATSAPP_ACCESS_TOKEN:EAAWQBFVu9l...}
-  verify-token: ${WHATSAPP_VERIFY_TOKEN:jireh_webhook_2025}
-  business-account-id: ${WHATSAPP_BUSINESS_ACCOUNT_ID:1676627570373964}
