@@ -69,7 +69,7 @@ public class EnvioServiceImpl implements EnvioService {
     @Override
     @Transactional
     public SolicitudEnvio crearDesdeTexto(String whatsapp, String textoCrudo) {
-        var cliente = clienteRepo.findByWhatsapp(whatsapp).orElse(null);
+        var cliente =  clienteRepo.findByWhatsapp(whatsapp).orElse(null);
 
         var datos = parsearTexto(textoCrudo);
         var envio = SolicitudEnvio.builder()
