@@ -16,4 +16,6 @@ public interface WhatsAppService {
     void enviarNotificacionEnvio(String destinatario, String nombre, String guia);
 
     void enviarConfirmacionApartado(String destinatario, String nombre, String prenda, String precio);
+
+    void actualizarNombreCliente(String whatsappFrom, String nombre);
 }

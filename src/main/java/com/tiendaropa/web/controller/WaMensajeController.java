@@ -33,4 +33,15 @@ public class WaMensajeController {
         if (texto == null || texto.isBlank()) throw new IllegalArgumentException("'texto' es requerido");
         whatsAppService.enviarMensaje(to, texto);
     }
+
+    @PutMapping("/cliente")
+    public void actualizarCliente(@RequestBody Map<String, String> body) {
+        var whatsappFrom = body.get("whatsappFrom");
+        var nombre = body.get("nombre");
+        if (whatsappFrom == null || whatsappFrom.isBlank())
+            throw new IllegalArgumentException("'whatsappFrom' es requerido");
+        if (nombre == null || nombre.isBlank())
+            throw new IllegalArgumentException("'nombre' es requerido");
+        whatsAppService.actualizarNombreCliente(whatsappFrom, nombre);
+    }
 }

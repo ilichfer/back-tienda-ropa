@@ -1,6 +1,7 @@
 package com.tiendaropa.domain.service.impl;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.tiendaropa.domain.model.Cliente;
 import com.tiendaropa.domain.model.WaMensaje;
 import com.tiendaropa.domain.repository.ClienteRepository;
 import com.tiendaropa.domain.repository.SolicitudEnvioRepository;
@@ -341,5 +342,13 @@ public class WhatsAppServiceImpl implements WhatsAppService {
             • Bancolombia: 123-456789-12
 
             ¡Gracias por tu compra! 🛍️""".formatted(nombre, prenda, precio));
+    }
+
+    @Override
+    public void actualizarNombreCliente(String whatsappFrom, String nombre) {
+        var cliente = clienteRepo.findByWhatsapp(whatsappFrom).orElseGet(() ->
+                clienteRepo.save(Cliente.builder().whatsapp(whatsappFrom).build()));
+        cliente.setNombre(nombre);
+        clienteRepo.save(cliente);
     }
 }
