@@ -22,3 +22,4 @@ whatsapp:
   access-token: EAAWQBFVu9lIBRqK211heVttPVcnskz7du7nMegV3B9cxdYLPKhY1ZBQ0hVBJ7aiBtS3x3UcumOnJHSAUA7IWZAYyk95Mu220j2G8phdNjjoumzzMI7w52cZCZAmvJEeHgu8J0IR5aztiiMae6NlErNFhhWjCTq3P3jgumPuZBzFZB5IzWYHfGw0HjvOArxXzGC1wZDZD
   verify-token: jireh_webhook_2025
   business-account-id: 1676627570373964
+  media-dir: ./media

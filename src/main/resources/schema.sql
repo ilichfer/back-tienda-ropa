@@ -94,6 +94,7 @@ CREATE TABLE IF NOT EXISTS wa_mensajes (
     direccion       VARCHAR(10) NOT NULL,
     wa_message_id   VARCHAR(120),
     media_id        VARCHAR(255),
+    media_path      VARCHAR(500),
     mime_type       VARCHAR(80),
     created_at      TIMESTAMPTZ DEFAULT now()
 ) //

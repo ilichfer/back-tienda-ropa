@@ -9,3 +9,4 @@ whatsapp:
   access-token: ${WHATSAPP_ACCESS_TOKEN}
   verify-token: ${WHATSAPP_VERIFY_TOKEN}
   business-account-id: ${WHATSAPP_BUSINESS_ACCOUNT_ID}
+  media-dir: ${WHATSAPP_MEDIA_DIR:./media}

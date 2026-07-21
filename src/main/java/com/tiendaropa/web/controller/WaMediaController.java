@@ -3,12 +3,17 @@ package com.tiendaropa.web.controller;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.io.Resource;
 import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.ByteArrayOutputStream;
 import java.net.HttpURLConnection;
 import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Map;
 
 @RestController
@@ -17,10 +22,37 @@ import java.util.Map;
 public class WaMediaController {
 
     private final String accessToken;
+    private final String mediaDir;
     private final ObjectMapper mapper = new ObjectMapper();
 
-    public WaMediaController(@Value("${whatsapp.access-token}") String accessToken) {
+    public WaMediaController(
+            @Value("${whatsapp.access-token}") String accessToken,
+            @Value("${whatsapp.media-dir:./media}") String mediaDir) {
         this.accessToken = accessToken;
+        this.mediaDir = mediaDir;
+    }
+
+    @GetMapping("/local/{subdir}/{filename:.+}")
+    public ResponseEntity<Resource> descargarLocal(
+            @PathVariable String subdir,
+            @PathVariable String filename) {
+        try {
+            Path filePath = Paths.get(mediaDir, subdir, filename).normalize();
+            if (!Files.exists(filePath) || !filePath.startsWith(Paths.get(mediaDir).normalize())) {
+                return ResponseEntity.notFound().build();
+            }
+            var resource = new FileSystemResource(filePath);
+            var contentType = Files.probeContentType(filePath);
+            if (contentType == null) contentType = "application/octet-stream";
+
+            return ResponseEntity.ok()
+                    .contentType(MediaType.parseMediaType(contentType))
+                    .cacheControl(CacheControl.maxAge(86400, java.util.concurrent.TimeUnit.SECONDS).cachePublic())
+                    .body(resource);
+        } catch (Exception e) {
+            log.error("Error sirviendo archivo local {}/{}: {}", subdir, filename, e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
     }
 
     @GetMapping("/{mediaId}")

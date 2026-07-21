@@ -37,6 +37,9 @@ public class WaMensaje {
     @Column(length = 255)
     private String mediaId;
 
+    @Column(length = 500)
+    private String mediaPath;
+
     @Column(length = 80)
     private String mimeType;
 
