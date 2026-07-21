@@ -20,9 +20,9 @@ public class WaMensajeController {
     @GetMapping
     public List<WaMensaje> listar(@RequestParam(required = false) String whatsapp) {
         if (whatsapp != null) {
-            return waMensajeRepo.findByWhatsappFromOrderByCreatedAtDesc(whatsapp);
+            return waMensajeRepo.findByWhatsappFromConCliente(whatsapp);
         }
-        return waMensajeRepo.findAll();
+        return waMensajeRepo.findAllConCliente();
     }
 
     @PostMapping("/enviar")
