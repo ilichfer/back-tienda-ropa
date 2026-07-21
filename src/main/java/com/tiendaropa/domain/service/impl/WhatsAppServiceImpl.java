@@ -350,5 +350,12 @@ public class WhatsAppServiceImpl implements WhatsAppService {
                 clienteRepo.save(Cliente.builder().whatsapp(whatsappFrom).build()));
         cliente.setNombre(nombre);
         clienteRepo.save(cliente);
+        var mensajes = mensajeRepo.findByWhatsappFromOrderByCreatedAtDesc(whatsappFrom);
+        for (var m : mensajes) {
+            if (m.getCliente() == null) {
+                m.setCliente(cliente);
+            }
+        }
+        mensajeRepo.saveAll(mensajes);
     }
 }
