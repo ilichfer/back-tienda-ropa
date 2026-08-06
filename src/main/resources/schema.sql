@@ -8,8 +8,8 @@
 DO $$ BEGIN ALTER TABLE pedidos ALTER COLUMN estado TYPE VARCHAR(20) USING estado::text; EXCEPTION WHEN others THEN NULL; END; $$ //
 DO $$ BEGIN ALTER TABLE pedido_eventos ALTER COLUMN estado TYPE VARCHAR(20) USING estado::text; EXCEPTION WHEN others THEN NULL; END; $$ //
 DO $$ BEGIN ALTER TABLE prendas ALTER COLUMN estado TYPE VARCHAR(20) USING estado::text; EXCEPTION WHEN others THEN NULL; END; $$ //
-DO $$ BEGIN DROP TYPE IF EXISTS estado_pedido; EXCEPTION WHEN dependent_objects THEN NULL; END; $$ //
-DO $$ BEGIN DROP TYPE IF EXISTS estado_prenda; EXCEPTION WHEN dependent_objects THEN NULL; END; $$ //
+DO $$ BEGIN DROP TYPE IF EXISTS estado_pedido; EXCEPTION WHEN others THEN NULL; END; $$ //
+DO $$ BEGIN DROP TYPE IF EXISTS estado_prenda; EXCEPTION WHEN others THEN NULL; END; $$ //
 
 -- Clientes
 CREATE TABLE IF NOT EXISTS clientes (
