@@ -86,6 +86,10 @@ CREATE TABLE IF NOT EXISTS pedido_eventos (
     created_at  TIMESTAMPTZ DEFAULT now()
 ) //
 
+-- Columnas de bodega en pedidos (idempotente)
+DO $$ BEGIN ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS nombre_dueño VARCHAR(120); EXCEPTION WHEN others THEN NULL; END; $$ //
+DO $$ BEGIN ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS ubicacion VARCHAR(20); EXCEPTION WHEN others THEN NULL; END; $$ //
+
 -- Mensajes de WhatsApp
 CREATE TABLE IF NOT EXISTS wa_mensajes (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
