@@ -62,8 +62,8 @@ CREATE TABLE IF NOT EXISTS prendas (
 CREATE TABLE IF NOT EXISTS pedidos (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     numero          BIGSERIAL,
-    cliente_id      UUID NOT NULL REFERENCES clientes(id),
-    prenda_id       UUID NOT NULL REFERENCES prendas(id),
+    cliente_id      UUID REFERENCES clientes(id),
+    prenda_id       UUID REFERENCES prendas(id),
     estado          estado_pedido DEFAULT 'NUEVO',
     precio_final    NUMERIC(12,2),
     costo_envio     NUMERIC(12,2) DEFAULT 12000,
@@ -89,6 +89,8 @@ CREATE TABLE IF NOT EXISTS pedido_eventos (
 -- Columnas de bodega en pedidos (idempotente)
 DO $$ BEGIN ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS nombre_dueño VARCHAR(120); EXCEPTION WHEN others THEN NULL; END; $$ //
 DO $$ BEGIN ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS ubicacion VARCHAR(20); EXCEPTION WHEN others THEN NULL; END; $$ //
+DO $$ BEGIN ALTER TABLE pedidos ALTER COLUMN cliente_id DROP NOT NULL; EXCEPTION WHEN others THEN NULL; END; $$ //
+DO $$ BEGIN ALTER TABLE pedidos ALTER COLUMN prenda_id DROP NOT NULL; EXCEPTION WHEN others THEN NULL; END; $$ //
 
 -- Mensajes de WhatsApp
 CREATE TABLE IF NOT EXISTS wa_mensajes (

@@ -10,6 +10,8 @@ public interface PedidoService {
 
     Pedido crear(PedidoRequest req);
 
+    Pedido crearBodega(String nombre, String ubicacion);
+
     Pedido cambiarEstado(UUID pedidoId, EstadoPedido nuevoEstado, String nota);
 
     Pedido actualizarBodega(UUID pedidoId, String nombreDueño, String ubicacion);

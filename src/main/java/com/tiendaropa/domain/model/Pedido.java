@@ -21,11 +21,11 @@ public class Pedido {
     @Column(name = "numero", insertable = false, updatable = false)
     private Long numero;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "cliente_id")
     private Cliente cliente;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "prenda_id")
     private Prenda prenda;
 

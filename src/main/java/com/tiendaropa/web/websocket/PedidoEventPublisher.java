@@ -32,8 +32,8 @@ public class PedidoEventPublisher {
                 p.getId().toString(),
                 p.getNumero(),
                 p.getEstado().name(),
-                p.getCliente().getNombre(),
-                p.getPrenda().getNombre()
+                p.getCliente() != null ? p.getCliente().getNombre() : p.getNombreDueño(),
+                p.getPrenda() != null ? p.getPrenda().getNombre() : ""
             );
         }
     }

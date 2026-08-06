@@ -7,13 +7,13 @@ import com.tiendaropa.domain.service.WhatsAppService;
 import com.tiendaropa.web.dto.request.CambiarEstadoRequest;
 import com.tiendaropa.web.dto.request.PedidoRequest;
 import com.tiendaropa.web.dto.response.PedidoResponse;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-
-import jakarta.servlet.http.HttpServletRequest;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -41,6 +41,12 @@ public class PedidoController {
     public ResponseEntity<PedidoResponse> crear(@Valid @RequestBody PedidoRequest req) {
         var pedido = pedidoService.crear(req);
         return ResponseEntity.ok(PedidoResponse.from(pedido));
+    }
+
+    @PostMapping("/pedidos/bodega")
+    public ResponseEntity<PedidoResponse> crearBodega(@RequestBody Map<String, String> body) {
+        var pedido = pedidoService.crearBodega(body.get("nombre"), body.get("ubicacion"));
+        return ResponseEntity.status(HttpStatus.CREATED).body(PedidoResponse.from(pedido));
     }
 
     @PatchMapping("/pedidos/{id}/estado")

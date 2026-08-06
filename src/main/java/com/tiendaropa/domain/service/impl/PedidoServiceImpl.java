@@ -101,6 +101,30 @@ public class PedidoServiceImpl implements PedidoService {
 
     @Override
     @Transactional
+    public Pedido crearBodega(String nombre, String ubicacion) {
+        if (nombre == null || nombre.isBlank()) {
+            throw new IllegalArgumentException("El nombre es requerido");
+        }
+        if (ubicacion == null || ubicacion.isBlank()) {
+            throw new IllegalArgumentException("La ubicación es requerida");
+        }
+        if (!"REPISA".equals(ubicacion) && !"ESTANTE".equals(ubicacion)) {
+            throw new IllegalArgumentException("Ubicación inválida: solo REPISA o ESTANTE");
+        }
+
+        var pedido = pedidoRepo.save(Pedido.builder()
+                .nombreDueño(nombre.trim())
+                .ubicacion(ubicacion.trim().toUpperCase())
+                .estado(EstadoPedido.NUEVO)
+                .build());
+
+        registrarEvento(pedido, EstadoPedido.NUEVO, "Pedido registrado en bodega");
+        eventPublisher.publish(pedido);
+        return pedido;
+    }
+
+    @Override
+    @Transactional
     public Pedido actualizarBodega(UUID pedidoId, String nombreDueño, String ubicacion) {
         var pedido = pedidoRepo.findById(pedidoId)
                 .orElseThrow(() -> new IllegalArgumentException("Pedido no encontrado"));
