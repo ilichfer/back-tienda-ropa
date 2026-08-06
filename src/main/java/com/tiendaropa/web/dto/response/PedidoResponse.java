@@ -18,6 +18,8 @@ public record PedidoResponse(
     String numeroGuia,
     String transportadora,
     String notas,
+    String nombreDueño,
+    String ubicacion,
     Instant createdAt
 ) {
     public static PedidoResponse from(Pedido p) {
@@ -31,6 +33,7 @@ public record PedidoResponse(
             p.getPrecioFinal(), p.getCostoEnvio(),
             p.getPrecioFinal().add(p.getCostoEnvio()),
             p.getNumeroGuia(), p.getTransportadora(), p.getNotas(),
+            p.getNombreDueño(), p.getUbicacion(),
             p.getCreatedAt()
         );
     }

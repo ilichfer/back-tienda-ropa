@@ -12,5 +12,7 @@ public interface PedidoService {
 
     Pedido cambiarEstado(UUID pedidoId, EstadoPedido nuevoEstado, String nota);
 
+    Pedido actualizarBodega(UUID pedidoId, String nombreDueño, String ubicacion);
+
     List<Pedido> listarPorEstado(EstadoPedido estado);
 }

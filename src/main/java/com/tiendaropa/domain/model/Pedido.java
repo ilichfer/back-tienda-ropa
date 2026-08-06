@@ -45,6 +45,12 @@ public class Pedido {
     private String transportadora;
     private String notas;
 
+    @Column(name = "nombre_dueño", length = 120)
+    private String nombreDueño;
+
+    @Column(length = 20)
+    private String ubicacion;
+
     @Column(name = "created_at", insertable = false, updatable = false)
     private Instant createdAt;
 

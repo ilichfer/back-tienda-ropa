@@ -100,6 +100,25 @@ public class PedidoServiceImpl implements PedidoService {
     }
 
     @Override
+    @Transactional
+    public Pedido actualizarBodega(UUID pedidoId, String nombreDueño, String ubicacion) {
+        var pedido = pedidoRepo.findById(pedidoId)
+                .orElseThrow(() -> new IllegalArgumentException("Pedido no encontrado"));
+
+        if (ubicacion != null && !ubicacion.isBlank()
+                && !"REPISA".equals(ubicacion) && !"ESTANTE".equals(ubicacion)) {
+            throw new IllegalArgumentException("Ubicación inválida: solo REPISA o ESTANTE");
+        }
+
+        pedido.setNombreDueño(nombreDueño == null || nombreDueño.isBlank() ? null : nombreDueño.trim());
+        pedido.setUbicacion(ubicacion == null || ubicacion.isBlank() ? null : ubicacion.trim().toUpperCase());
+
+        var saved = pedidoRepo.save(pedido);
+        eventPublisher.publish(saved);
+        return saved;
+    }
+
+    @Override
     public List<Pedido> listarPorEstado(EstadoPedido estado) {
         return estado == null
                 ? pedidoRepo.findAllOrderByCreatedAtDesc()

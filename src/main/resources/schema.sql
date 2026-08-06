@@ -71,6 +71,8 @@ CREATE TABLE IF NOT EXISTS pedidos (
     numero_guia     VARCHAR(80),
     transportadora  VARCHAR(50),
     notas           TEXT,
+    nombre_dueño    VARCHAR(120),
+    ubicacion       VARCHAR(20),
     created_at      TIMESTAMPTZ DEFAULT now(),
     updated_at      TIMESTAMPTZ DEFAULT now()
 ) //

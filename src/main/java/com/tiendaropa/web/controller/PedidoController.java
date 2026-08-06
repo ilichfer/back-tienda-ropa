@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.*;
 
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @RestController
@@ -47,6 +48,17 @@ public class PedidoController {
             @PathVariable UUID id,
             @Valid @RequestBody CambiarEstadoRequest req) {
         var pedido = pedidoService.cambiarEstado(id, req.estado(), req.nota());
+        return ResponseEntity.ok(PedidoResponse.from(pedido));
+    }
+
+    @PatchMapping("/pedidos/{id}/bodega")
+    public ResponseEntity<PedidoResponse> actualizarBodega(
+            @PathVariable UUID id,
+            @RequestBody Map<String, String> body) {
+        var pedido = pedidoService.actualizarBodega(
+                id,
+                body.get("nombreDueño"),
+                body.get("ubicacion"));
         return ResponseEntity.ok(PedidoResponse.from(pedido));
     }
 
