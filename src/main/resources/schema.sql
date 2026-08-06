@@ -3,25 +3,13 @@
 -- Idempotente: se puede ejecutar múltiples veces sin errores
 -- ============================================================
 
-DO $do$
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'estado_pedido') THEN
-        CREATE TYPE estado_pedido AS ENUM (
-            'NUEVO', 'APARTADO', 'PAGADO', 'EMPACADO', 'ENVIADO', 'ENTREGADO', 'CANCELADO'
-        );
-    END IF;
-END;
-$do$ //
-
-DO $do$
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'estado_prenda') THEN
-        CREATE TYPE estado_prenda AS ENUM (
-            'DISPONIBLE', 'APARTADA', 'PAGADA', 'ENVIADA'
-        );
-    END IF;
-END;
-$do$ //
+-- Los estados se guardan como VARCHAR (EnumType.STRING en JPA).
+-- Se convierten los enums nativos de Postgres existentes (si hay) a VARCHAR.
+DO $$ BEGIN ALTER TABLE pedidos ALTER COLUMN estado TYPE VARCHAR(20) USING estado::text; EXCEPTION WHEN others THEN NULL; END; $$ //
+DO $$ BEGIN ALTER TABLE pedido_eventos ALTER COLUMN estado TYPE VARCHAR(20) USING estado::text; EXCEPTION WHEN others THEN NULL; END; $$ //
+DO $$ BEGIN ALTER TABLE prendas ALTER COLUMN estado TYPE VARCHAR(20) USING estado::text; EXCEPTION WHEN others THEN NULL; END; $$ //
+DO $$ BEGIN DROP TYPE IF EXISTS estado_pedido; EXCEPTION WHEN dependent_objects THEN NULL; END; $$ //
+DO $$ BEGIN DROP TYPE IF EXISTS estado_prenda; EXCEPTION WHEN dependent_objects THEN NULL; END; $$ //
 
 -- Clientes
 CREATE TABLE IF NOT EXISTS clientes (
@@ -52,7 +40,7 @@ CREATE TABLE IF NOT EXISTS prendas (
     talla           VARCHAR(10),
     color           VARCHAR(50),
     precio          NUMERIC(12,2) NOT NULL,
-    estado          estado_prenda DEFAULT 'DISPONIBLE',
+    estado          VARCHAR(20) DEFAULT 'DISPONIBLE',
     foto_url        VARCHAR(500),
     created_at      TIMESTAMPTZ DEFAULT now(),
     updated_at      TIMESTAMPTZ DEFAULT now()
@@ -64,7 +52,7 @@ CREATE TABLE IF NOT EXISTS pedidos (
     numero          BIGSERIAL,
     cliente_id      UUID REFERENCES clientes(id),
     prenda_id       UUID REFERENCES prendas(id),
-    estado          estado_pedido DEFAULT 'NUEVO',
+    estado          VARCHAR(20) DEFAULT 'NUEVO',
     precio_final    NUMERIC(12,2),
     costo_envio     NUMERIC(12,2) DEFAULT 12000,
     total           NUMERIC(12,2) GENERATED ALWAYS AS (precio_final + costo_envio) STORED,
@@ -81,7 +69,7 @@ CREATE TABLE IF NOT EXISTS pedidos (
 CREATE TABLE IF NOT EXISTS pedido_eventos (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     pedido_id   UUID NOT NULL REFERENCES pedidos(id),
-    estado      estado_pedido NOT NULL,
+    estado      VARCHAR(20) NOT NULL,
     nota        TEXT,
     created_at  TIMESTAMPTZ DEFAULT now()
 ) //

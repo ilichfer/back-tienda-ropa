@@ -30,7 +30,7 @@ public class Pedido {
     private Prenda prenda;
 
     @Enumerated(EnumType.STRING)
-    @Column(columnDefinition = "estado_pedido")
+    @Column(length = 20)
     private EstadoPedido estado = EstadoPedido.NUEVO;
 
     @Column(name = "precio_final", precision = 12, scale = 2)

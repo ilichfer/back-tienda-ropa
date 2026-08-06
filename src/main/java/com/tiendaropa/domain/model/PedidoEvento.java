@@ -20,7 +20,7 @@ public class PedidoEvento {
     private Pedido pedido;
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false, columnDefinition = "estado_pedido")
+    @Column(nullable = false, length = 20)
     private EstadoPedido estado;
 
     @Column(columnDefinition = "text")

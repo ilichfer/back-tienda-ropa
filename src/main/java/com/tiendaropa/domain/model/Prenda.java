@@ -33,7 +33,7 @@ public class Prenda {
     private BigDecimal precio;
 
     @Enumerated(EnumType.STRING)
-    @Column(columnDefinition = "estado_prenda")
+    @Column(length = 20)
     @Builder.Default
     private EstadoPrenda estado = EstadoPrenda.DISPONIBLE;
 
