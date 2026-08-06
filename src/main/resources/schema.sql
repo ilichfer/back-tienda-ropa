@@ -94,6 +94,7 @@ CREATE TABLE IF NOT EXISTS wa_mensajes (
     mime_type       VARCHAR(80),
     created_at      TIMESTAMPTZ DEFAULT now()
 ) //
+DO $$ BEGIN ALTER TABLE wa_mensajes ADD COLUMN IF NOT EXISTS media_path VARCHAR(500); EXCEPTION WHEN others THEN NULL; END; $$ //
 
 -- Plantillas de respuesta rápida
 CREATE TABLE IF NOT EXISTS wa_plantillas (
