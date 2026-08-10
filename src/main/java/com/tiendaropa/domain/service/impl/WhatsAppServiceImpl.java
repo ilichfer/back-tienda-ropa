@@ -387,16 +387,16 @@ public class WhatsAppServiceImpl implements WhatsAppService {
             "Seleccionar valor",
             "Valor de la prenda",
             List.of(
-                Map.of("id", "list_valor_15000", "title", "$15.000"),
-                Map.of("id", "list_valor_20000", "title", "$20.000"),
-                Map.of("id", "list_valor_25000", "title", "$25.000"),
-                Map.of("id", "list_valor_30000", "title", "$30.000"),
-                Map.of("id", "list_valor_35000", "title", "$35.000"),
-                Map.of("id", "list_valor_40000", "title", "$40.000"),
-                Map.of("id", "list_valor_50000", "title", "$50.000"),
-                Map.of("id", "list_valor_60000", "title", "$60.000"),
-                Map.of("id", "list_valor_otro", "title", "💰 Otro valor"),
-                Map.of("id", "list_valor_nose", "title", "🙈 No sé el valor")
+                Map.of("id", "valor_15000", "title", "$15.000"),
+                Map.of("id", "valor_20000", "title", "$20.000"),
+                Map.of("id", "valor_25000", "title", "$25.000"),
+                Map.of("id", "valor_30000", "title", "$30.000"),
+                Map.of("id", "valor_35000", "title", "$35.000"),
+                Map.of("id", "valor_40000", "title", "$40.000"),
+                Map.of("id", "valor_50000", "title", "$50.000"),
+                Map.of("id", "valor_60000", "title", "$60.000"),
+                Map.of("id", "valor_otro", "title", "💰 Otro valor"),
+                Map.of("id", "valor_nose", "title", "🙈 No sé el valor")
             ));
     }
 
