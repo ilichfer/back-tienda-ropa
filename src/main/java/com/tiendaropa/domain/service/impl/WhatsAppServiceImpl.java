@@ -15,10 +15,13 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Service
@@ -31,6 +34,9 @@ public class WhatsAppServiceImpl implements WhatsAppService {
 
     @Value("${whatsapp.access-token}")
     private String accessToken;
+
+    @Value("${whatsapp.media-dir:./media}")
+    private String mediaDir;
 
     private final WebClient whatsappWebClient;
 
@@ -369,6 +375,9 @@ public class WhatsAppServiceImpl implements WhatsAppService {
     }
 
     private void registrarCargoDesdeBot(String from, ConversacionCliente conv, Long valor) {
+        if (conv.mediaPath == null && conv.mediaId != null) {
+            conv.mediaPath = descargarMediaLocal(conv.mediaId);
+        }
         var resp = cuentaService.registrarCargo(from, conv.concepto, valor,
                 conv.mediaId, conv.mediaPath, conv.mimeType);
         var concepto = resp.concepto() == null || resp.concepto().isBlank()
@@ -389,10 +398,58 @@ public class WhatsAppServiceImpl implements WhatsAppService {
     }
 
     private void registrarAbonoDesdeBot(String from, ConversacionCliente conv, Long valor) {
+        if (conv.mediaPath == null && conv.mediaId != null) {
+            conv.mediaPath = descargarMediaLocal(conv.mediaId);
+        }
         cuentaService.registrarAbonoDesdeBot(from, valor, conv.mediaId, conv.mediaPath, conv.mimeType);
         conversaciones.remove(from);
         enviarMensaje(from, "💳 ¡Listo! Registramos tu soporte de pago por $%d. La foto quedó en tu cuenta y la revisaremos para confirmarla. 💜"
                 .formatted(valor));
+    }
+
+    private String descargarMediaLocal(String mediaId) {
+        if (mediaId == null || mediaId.isBlank()) return null;
+        try {
+            var meta = whatsappWebClient.get()
+                .uri("/{mediaId}", mediaId)
+                .header("Authorization", "Bearer " + accessToken)
+                .retrieve()
+                .bodyToMono(JsonNode.class)
+                .block();
+            var urlStr = meta.has("url") ? meta.get("url").asText() : null;
+            if (urlStr == null) return null;
+            var mime = meta.has("mime_type") ? meta.get("mime_type").asText() : "image/jpeg";
+            var ext = extensionSegunMime(mime);
+
+            var bytes = whatsappWebClient.get()
+                .uri(urlStr)
+                .header("Authorization", "Bearer " + accessToken)
+                .retrieve()
+                .bodyToMono(byte[].class)
+                .block();
+            if (bytes == null || bytes.length == 0) return null;
+
+            var fileName = UUID.randomUUID() + "." + ext;
+            var targetDir = Paths.get(mediaDir, "cuentas");
+            Files.createDirectories(targetDir);
+            Files.write(targetDir.resolve(fileName), bytes);
+            log.info("Media {} descargada local como {}", mediaId, fileName);
+            return "cuentas/" + fileName;
+        } catch (Exception e) {
+            log.warn("No se pudo descargar media {} local: {}", mediaId, e.getMessage());
+            return null;
+        }
+    }
+
+    private static String extensionSegunMime(String mime) {
+        if (mime == null) return "bin";
+        return switch (mime) {
+            case "image/jpeg" -> "jpg";
+            case "image/png" -> "png";
+            case "image/webp" -> "webp";
+            case "application/pdf" -> "pdf";
+            default -> mime.contains("image/") ? "img" : "bin";
+        };
     }
 
     private Long extraerNumero(String s) {
