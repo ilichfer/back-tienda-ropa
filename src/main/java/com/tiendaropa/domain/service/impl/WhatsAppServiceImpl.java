@@ -149,7 +149,8 @@ public class WhatsAppServiceImpl implements WhatsAppService {
             } else if (tipo.equals("text")) {
                 procesarTextoEntrante(from, contenido);
             } else if (tipo.equals("image")) {
-                if (!conversaciones.containsKey(from)) {
+                var conv = conversaciones.get(from);
+                if (conv == null || FLUJO_PEDIDO.equals(conv.flujo)) {
                     iniciarFlujoPedidoFoto(from, mediaId, mimeType);
                 }
             }
