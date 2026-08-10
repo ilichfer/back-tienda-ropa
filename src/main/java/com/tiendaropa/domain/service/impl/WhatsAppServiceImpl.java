@@ -199,14 +199,14 @@ public class WhatsAppServiceImpl implements WhatsAppService {
                 enviarMensaje(from, """
                     Te comunicaré con una asesora. Por favor espera, en breve te atenderemos.""");
             }
-            case "si_foto" -> {
+            case "button_si_foto" -> {
                 var conv = conversaciones.get(from);
                 if (conv != null && FLUJO_PEDIDO.equals(conv.flujo) && conv.paso == PEDIDO_CONFIRMAR_FOTO) {
                     conv.paso = PEDIDO_VALOR;
                     enviarOpcionesValor(from);
                 }
             }
-            case "no_foto" -> {
+            case "button_no_foto" -> {
                 conversaciones.remove(from);
                 enviarMensaje(from, "Entendido 🙂 ¿En qué más te puedo ayudar?");
             }
