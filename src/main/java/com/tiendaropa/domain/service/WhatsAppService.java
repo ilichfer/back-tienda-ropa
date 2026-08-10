@@ -13,6 +13,9 @@ public interface WhatsAppService {
 
     void enviarBotones(String destinatario, String texto, List<Map<String, String>> botones);
 
+    void enviarLista(String destinatario, String texto, String botonAccion, String tituloSeccion,
+                     List<Map<String, String>> opciones);
+
     void enviarNotificacionEnvio(String destinatario, String nombre, String guia);
 
     void enviarConfirmacionApartado(String destinatario, String nombre, String prenda, String precio);

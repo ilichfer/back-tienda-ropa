@@ -6,6 +6,7 @@ import com.tiendaropa.domain.model.WaMensaje;
 import com.tiendaropa.domain.repository.ClienteRepository;
 import com.tiendaropa.domain.repository.SolicitudEnvioRepository;
 import com.tiendaropa.domain.repository.WaMensajeRepository;
+import com.tiendaropa.domain.service.CuentaService;
 import com.tiendaropa.domain.service.EnvioService;
 import com.tiendaropa.domain.service.WhatsAppService;
 import lombok.RequiredArgsConstructor;
@@ -37,18 +38,33 @@ public class WhatsAppServiceImpl implements WhatsAppService {
     private final ClienteRepository   clienteRepo;
     private final EnvioService envioService;
     private final SolicitudEnvioRepository solicitudRepo;
+    private final CuentaService cuentaService;
 
-    private static class EnvioConversation {
+    private static final String FLUJO_ENVIO  = "ENVIO";
+    private static final String FLUJO_PEDIDO = "PEDIDO";
+
+    private static final int PEDIDO_CONFIRMAR_FOTO = 0;
+    private static final int PEDIDO_NOMBRE         = 1;
+    private static final int PEDIDO_VALOR          = 2;
+    private static final int PEDIDO_VALOR_TEXTO    = 3;
+    private static final int PEDIDO_ENVIO          = 4;
+
+    private static class ConversacionCliente {
+        String flujo;
+        int paso;
         String nombre;
         String telefono;
         String cedula;
         String direccion;
         String ciudad;
         String barrio;
-        int step;
+        String concepto;
+        String mediaId;
+        String mediaPath;
+        String mimeType;
     }
 
-    private final ConcurrentHashMap<String, EnvioConversation> conversacionesEnvio = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, ConversacionCliente> conversaciones = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Instant> ultimaInteraccion = new ConcurrentHashMap<>();
 
     @Override
@@ -86,6 +102,13 @@ public class WhatsAppServiceImpl implements WhatsAppService {
                         contenido = title;
                         tipo = "button_" + id;
                         log.info("WA botón [{}]: {} ({})", from, title, id);
+                    } else if ("list_reply".equals(sub)) {
+                        var lr     = inter.get("list_reply");
+                        var id     = lr.get("id").asText();
+                        var title  = lr.get("title").asText();
+                        contenido = title;
+                        tipo = "list_" + id;
+                        log.info("WA lista [{}]: {} ({})", from, title, id);
                     } else {
                         log.info("WA interactive ignorado [{}]: {}", from, sub);
                         return;
@@ -129,15 +152,17 @@ public class WhatsAppServiceImpl implements WhatsAppService {
                     .mimeType(mimeType.isBlank() ? null : mimeType)
                     .build());
 
-            if (tipo.startsWith("button_")) {
+            if (tipo.startsWith("button_") || tipo.startsWith("list_")) {
                 procesarBoton(from, tipo, contenido, cliente);
-            }
-
-            if (tipo.equals("text")) {
+            } else if (tipo.equals("text")) {
                 procesarTextoEntrante(from, contenido);
+            } else if (tipo.equals("image")) {
+                if (!conversaciones.containsKey(from)) {
+                    iniciarFlujoPedidoFoto(from, mediaId, mimeType);
+                }
             }
 
-            if (cliente == null && !conversacionesEnvio.containsKey(from)) {
+            if (cliente == null && !conversaciones.containsKey(from)) {
                 var ultima = ultimaInteraccion.get(from);
                 if (ultima == null || ChronoUnit.HOURS.between(ultima, Instant.now()) >= 12) {
                     enviarBotones(from, """
@@ -155,63 +180,118 @@ public class WhatsAppServiceImpl implements WhatsAppService {
         }
     }
 
-    private void procesarBoton(String from, String tipo, String contenido, com.tiendaropa.domain.model.Cliente cliente) {
+    private void procesarBoton(String from, String tipo, String contenido, Cliente cliente) {
+        if (tipo.startsWith("list_")) {
+            procesarLista(from, tipo);
+            return;
+        }
+
         switch (tipo) {
-            case "button_envio" -> {
-                conversacionesEnvio.put(from, new EnvioConversation());
-                enviarMensaje(from, """
-                    Te voy a solicitar los siguientes datos para tu envío:
-                    
-                    • Nombre completo
-                    • Teléfono
-                    • Cédula
-                    • Dirección
-                    • Ciudad
-                    • Barrio
-                    
-                    Empecemos. ¿Cuál es tu nombre completo? 📝""");
-                log.info("Iniciado flujo envío paso a paso para {}", from);
-            }
+            case "button_envio" -> iniciarFlujoEnvio(from);
             case "button_asesora" -> {
+                conversaciones.remove(from);
                 enviarMensaje(from, """
                     Te comunicaré con una asesora. Por favor espera, en breve te atenderemos.""");
+            }
+            case "si_foto" -> {
+                var conv = conversaciones.get(from);
+                if (conv != null && FLUJO_PEDIDO.equals(conv.flujo) && conv.paso == PEDIDO_CONFIRMAR_FOTO) {
+                    conv.paso = PEDIDO_VALOR;
+                    enviarOpcionesValor(from);
+                }
+            }
+            case "no_foto" -> {
+                conversaciones.remove(from);
+                enviarMensaje(from, "Entendido 🙂 ¿En qué más te puedo ayudar?");
+            }
+            case "button_apartar_solo" -> {
+                conversaciones.remove(from);
+                enviarMensaje(from, "✅ Listo, tu prenda quedó apartada. Cuando quieras pagar o enviar, avísanos. 💜");
+            }
+            default -> log.info("Botón sin manejo [{}]: {}", from, tipo);
+        }
+    }
+
+    private void procesarLista(String from, String tipo) {
+        var conv = conversaciones.get(from);
+        if (conv == null || !FLUJO_PEDIDO.equals(conv.flujo) || conv.paso != PEDIDO_VALOR) return;
+
+        if (tipo.equals("list_valor_nose")) {
+            registrarCargoDesdeBot(from, conv, null);
+        } else if (tipo.equals("list_valor_otro")) {
+            conv.paso = PEDIDO_VALOR_TEXTO;
+            enviarMensaje(from, "¿Cuánto cuesta la prenda? Escribe el valor solo en números, por ejemplo: 45000");
+        } else if (tipo.startsWith("list_valor_")) {
+            try {
+                long valor = Long.parseLong(tipo.substring("list_valor_".length()));
+                registrarCargoDesdeBot(from, conv, valor);
+            } catch (NumberFormatException e) {
+                log.warn("Valor de lista no numérico [{}]: {}", from, tipo);
             }
         }
     }
 
     private void procesarTextoEntrante(String from, String contenido) {
-        var conv = conversacionesEnvio.get(from);
-        if (conv == null) return;
+        var conv = conversaciones.get(from);
 
-        switch (conv.step) {
+        if (conv == null) {
+            if (esIntencionPedido(contenido)) {
+                iniciarFlujoPedidoTexto(from);
+            }
+            return;
+        }
+
+        if (FLUJO_ENVIO.equals(conv.flujo)) {
+            procesarTextoEnvio(from, conv, contenido);
+            return;
+        }
+
+        if (FLUJO_PEDIDO.equals(conv.flujo)) {
+            if (conv.paso == PEDIDO_NOMBRE) {
+                conv.concepto = contenido.trim();
+                conv.paso = PEDIDO_VALOR;
+                enviarOpcionesValor(from);
+            } else if (conv.paso == PEDIDO_VALOR_TEXTO) {
+                var valor = extraerNumero(contenido);
+                if (valor == null) {
+                    enviarMensaje(from, "No entendí el valor 🤔 Escribe solo números, por ejemplo: 45000");
+                } else {
+                    registrarCargoDesdeBot(from, conv, valor);
+                }
+            }
+        }
+    }
+
+    private void procesarTextoEnvio(String from, ConversacionCliente conv, String contenido) {
+        switch (conv.paso) {
             case 0 -> {
                 conv.nombre = contenido;
-                conv.step = 1;
+                conv.paso = 1;
                 enviarMensaje(from, "Gracias. ¿Cuál es tu número de teléfono? 📞");
             }
             case 1 -> {
                 conv.telefono = contenido;
-                conv.step = 2;
+                conv.paso = 2;
                 enviarMensaje(from, "Perfecto. ¿Cuál es tu número de cédula? 🪪");
             }
             case 2 -> {
                 conv.cedula = contenido;
-                conv.step = 3;
+                conv.paso = 3;
                 enviarMensaje(from, "¿Cuál es tu dirección? 📍");
             }
             case 3 -> {
                 conv.direccion = contenido;
-                conv.step = 4;
+                conv.paso = 4;
                 enviarMensaje(from, "¿En qué ciudad te encuentras? 🏙️");
             }
             case 4 -> {
                 conv.ciudad = contenido;
-                conv.step = 5;
+                conv.paso = 5;
                 enviarMensaje(from, "¿Cuál es tu barrio? 🏘️");
             }
             case 5 -> {
                 conv.barrio = contenido;
-                conversacionesEnvio.remove(from);
+                conversaciones.remove(from);
                 envioService.crearConDatos(from, conv.nombre, conv.telefono, conv.cedula,
                     conv.direccion, conv.ciudad, conv.barrio);
                 enviarMensaje(from, """
@@ -219,7 +299,110 @@ public class WhatsAppServiceImpl implements WhatsAppService {
                     En breve te contactaremos para coordinar la entrega.""");
             }
         }
-        log.info("Flujo envío [{}] paso {}: {}", from, conv.step - 1, contenido);
+        log.info("Flujo envío [{}] paso {}: {}", from, conv.paso - 1, contenido);
+    }
+
+    private boolean esIntencionPedido(String contenido) {
+        if (contenido == null) return false;
+        var t = contenido.toLowerCase();
+        return t.contains("pedir") || t.contains("pedí") || t.contains("pedi")
+                || t.contains("apartar") || t.contains("aparta") || t.contains("apart")
+                || t.contains("guárdame") || t.contains("guardame") || t.contains("guárdamelo")
+                || t.contains("reservar") || t.contains("reserva") || t.contains("pedido");
+    }
+
+    private void iniciarFlujoPedidoFoto(String from, String mediaId, String mimeType) {
+        var conv = new ConversacionCliente();
+        conv.flujo = FLUJO_PEDIDO;
+        conv.paso = PEDIDO_CONFIRMAR_FOTO;
+        conv.mediaId = mediaId;
+        conv.mimeType = mimeType;
+        conversaciones.put(from, conv);
+        enviarBotones(from, """
+            📸 Recibí tu foto. ¿Quieres apartar esta prenda?""",
+            List.of(
+                Map.of("id", "si_foto", "title", "✅ Sí, la quiero"),
+                Map.of("id", "no_foto", "title", "❌ No")
+            ));
+    }
+
+    private void iniciarFlujoPedidoTexto(String from) {
+        var conv = new ConversacionCliente();
+        conv.flujo = FLUJO_PEDIDO;
+        conv.paso = PEDIDO_NOMBRE;
+        conversaciones.put(from, conv);
+        enviarMensaje(from, """
+            Claro 😊 ¿Qué prenda quieres apartar?
+            Escríbela así, por ejemplo: "jean talla 32" o "blusa azul".""");
+    }
+
+    private void iniciarFlujoEnvio(String from) {
+        var conv = new ConversacionCliente();
+        conv.flujo = FLUJO_ENVIO;
+        conv.paso = 0;
+        conversaciones.put(from, conv);
+        enviarMensaje(from, """
+            Te voy a solicitar los siguientes datos para tu envío:
+
+            • Nombre completo
+            • Teléfono
+            • Cédula
+            • Dirección
+            • Ciudad
+            • Barrio
+
+            Empecemos. ¿Cuál es tu nombre completo? 📝""");
+        log.info("Iniciado flujo envío paso a paso para {}", from);
+    }
+
+    private void registrarCargoDesdeBot(String from, ConversacionCliente conv, Long valor) {
+        var resp = cuentaService.registrarCargo(from, conv.concepto, valor,
+                conv.mediaId, conv.mediaPath, conv.mimeType);
+        var concepto = resp.concepto() == null || resp.concepto().isBlank()
+                ? "la prenda" : "\"" + resp.concepto() + "\"";
+        if (valor == null) {
+            enviarMensaje(from, "✅ Listo, apartamos %s sin precio (queda por definir). Cuando tengamos el valor te avisamos."
+                    .formatted(concepto));
+        } else {
+            enviarMensaje(from, "✅ ¡Listo! Apartamos %s por $%d.".formatted(concepto, valor));
+        }
+        conv.paso = PEDIDO_ENVIO;
+        enviarBotones(from, "¿Quieres que te lo enviemos? 📦",
+            List.of(
+                Map.of("id", "envio",        "title", "📦 Sí, quiero mi envío"),
+                Map.of("id", "apartar_solo", "title", "✅ No, solo apartarlo"),
+                Map.of("id", "asesora",      "title", "💬 Hablar con asesor")
+            ));
+    }
+
+    private void enviarOpcionesValor(String from) {
+        enviarLista(from,
+            "¿Cuánto cuesta la prenda? Selecciona una opción:",
+            "Seleccionar valor",
+            "Valor de la prenda",
+            List.of(
+                Map.of("id", "list_valor_15000", "title", "$15.000"),
+                Map.of("id", "list_valor_20000", "title", "$20.000"),
+                Map.of("id", "list_valor_25000", "title", "$25.000"),
+                Map.of("id", "list_valor_30000", "title", "$30.000"),
+                Map.of("id", "list_valor_35000", "title", "$35.000"),
+                Map.of("id", "list_valor_40000", "title", "$40.000"),
+                Map.of("id", "list_valor_50000", "title", "$50.000"),
+                Map.of("id", "list_valor_60000", "title", "$60.000"),
+                Map.of("id", "list_valor_otro", "title", "💰 Otro valor"),
+                Map.of("id", "list_valor_nose", "title", "🙈 No sé el valor")
+            ));
+    }
+
+    private Long extraerNumero(String s) {
+        var sb = new StringBuilder();
+        for (char c : s.toCharArray()) if (Character.isDigit(c)) sb.append(c);
+        if (sb.length() == 0) return null;
+        try {
+            return Long.parseLong(sb.toString());
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     @Override
@@ -293,6 +476,52 @@ public class WhatsAppServiceImpl implements WhatsAppService {
         } catch (Exception e) {
             log.error("Error enviando botones WA a {}", destinatario, e);
             throw new RuntimeException("Error enviando botones WhatsApp: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public void enviarLista(String destinatario, String texto, String botonAccion, String tituloSeccion,
+                            List<Map<String, String>> opciones) {
+        var rows = opciones.stream()
+            .map(o -> Map.of("id", o.get("id"), "title", o.get("title")))
+            .toList();
+
+        var body = Map.of(
+            "messaging_product", "whatsapp",
+            "to", destinatario,
+            "type", "interactive",
+            "interactive", Map.of(
+                "type", "list",
+                "body", Map.of("text", texto),
+                "action", Map.of(
+                    "button", botonAccion,
+                    "sections", new Object[]{
+                        Map.of("title", tituloSeccion, "rows", rows)
+                    }
+                )
+            )
+        );
+
+        try {
+            var r = whatsappWebClient.post()
+                .uri("/{phoneId}/messages", phoneNumberId)
+                .header("Authorization", "Bearer " + accessToken)
+                .bodyValue(body)
+                .retrieve()
+                .bodyToMono(JsonNode.class)
+                .block();
+
+            var titulos = opciones.stream().map(o -> o.get("title")).reduce((a, b1) -> a + " | " + b1).orElse("");
+            mensajeRepo.save(WaMensaje.builder()
+                    .whatsappFrom(destinatario)
+                    .contenido(texto + "\n📋 [" + titulos + "]")
+                    .tipo("list")
+                    .direccion("SALIDA")
+                    .waMessageId(r.get("messages").get(0).get("id").asText())
+                    .build());
+        } catch (Exception e) {
+            log.error("Error enviando lista WA a {}", destinatario, e);
+            throw new RuntimeException("Error enviando lista WhatsApp: " + e.getMessage(), e);
         }
     }
 
