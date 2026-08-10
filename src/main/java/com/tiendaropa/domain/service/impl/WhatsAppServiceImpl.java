@@ -162,9 +162,15 @@ public class WhatsAppServiceImpl implements WhatsAppService {
                 }
             }
 
-            if (cliente == null && !conversaciones.containsKey(from)) {
+            if (tipo.equals("text")) {
                 var ultima = ultimaInteraccion.get(from);
-                if (ultima == null || ChronoUnit.HOURS.between(ultima, Instant.now()) >= 12) {
+                var convVieja = conversaciones.containsKey(from)
+                        && ultima != null
+                        && ChronoUnit.HOURS.between(ultima, Instant.now()) >= 2;
+                if (convVieja) conversaciones.remove(from);
+
+                if (!conversaciones.containsKey(from)
+                        && (ultima == null || ChronoUnit.HOURS.between(ultima, Instant.now()) >= 12)) {
                     enviarBotones(from, """
                         ¡Hola! 👗 ¿En qué puedo ayudarte?""",
                         List.of(
