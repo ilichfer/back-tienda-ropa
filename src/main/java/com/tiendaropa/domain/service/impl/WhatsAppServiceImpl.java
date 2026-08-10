@@ -333,9 +333,9 @@ public class WhatsAppServiceImpl implements WhatsAppService {
         enviarBotones(from, """
             📸 Recibí tu foto. ¿Qué quieres hacer?""",
             List.of(
-                Map.of("id", "si_foto",       "title", "✅ Apartar esta prenda"),
-                Map.of("id", "soporte_pago",  "title", "💳 Es un soporte de pago"),
-                Map.of("id", "no_foto",       "title", "❌ Nada, gracias")
+                Map.of("id", "si_foto",       "title", "✅ Apartar prenda"),
+                Map.of("id", "soporte_pago",  "title", "💳 Es pago"),
+                Map.of("id", "no_foto",       "title", "❌ Nada")
             ));
     }
 
