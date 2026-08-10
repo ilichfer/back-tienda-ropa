@@ -382,8 +382,8 @@ public class WhatsAppServiceImpl implements WhatsAppService {
         conv.paso = PEDIDO_ENVIO;
         enviarBotones(from, "¿Quieres que te lo enviemos? 📦",
             List.of(
-                Map.of("id", "envio",        "title", "📦 Sí, quiero mi envío"),
-                Map.of("id", "apartar_solo", "title", "✅ No, solo apartarlo"),
+                Map.of("id", "envio",        "title", "📦 Quiero mi envío"),
+                Map.of("id", "apartar_solo", "title", "✅ Solo apartar"),
                 Map.of("id", "asesora",      "title", "💬 Hablar con asesor")
             ));
     }
@@ -442,7 +442,7 @@ public class WhatsAppServiceImpl implements WhatsAppService {
         var buttons = botones.stream()
             .map(b -> Map.of(
                 "type", "reply",
-                "reply", Map.of("id", b.get("id"), "title", b.get("title"))
+                "reply", Map.of("id", b.get("id"), "title", truncar(b.get("title"), 20))
             ))
             .toList();
 
@@ -478,6 +478,11 @@ public class WhatsAppServiceImpl implements WhatsAppService {
             log.error("Error enviando botones WA a {}", destinatario, e);
             throw new RuntimeException("Error enviando botones WhatsApp: " + e.getMessage(), e);
         }
+    }
+
+    private static String truncar(String s, int max) {
+        if (s == null) return "";
+        return s.length() <= max ? s : s.substring(0, max);
     }
 
     @Override
