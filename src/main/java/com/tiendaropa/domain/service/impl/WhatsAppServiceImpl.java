@@ -61,6 +61,7 @@ public class WhatsAppServiceImpl implements WhatsAppService {
         String mediaId;
         String mediaPath;
         String mimeType;
+        boolean soportePago;
     }
 
     private final ConcurrentHashMap<String, ConversacionCliente> conversaciones = new ConcurrentHashMap<>();
@@ -193,6 +194,13 @@ public class WhatsAppServiceImpl implements WhatsAppService {
                     preguntarValor(from, conv);
                 }
             }
+            case "button_soporte_pago" -> {
+                var conv = conversaciones.get(from);
+                if (conv != null && FLUJO_PEDIDO.equals(conv.flujo) && conv.paso == PEDIDO_CONFIRMAR_FOTO) {
+                    conv.soportePago = true;
+                    preguntarValorPago(from, conv);
+                }
+            }
             case "button_no_foto" -> {
                 conversaciones.remove(from);
                 enviarMensaje(from, "Entendido 🙂 ¿En qué más te puedo ayudar?");
@@ -210,6 +218,12 @@ public class WhatsAppServiceImpl implements WhatsAppService {
         enviarMensaje(from, """
             ¿Cuánto cuesta la prenda? Escribe el valor en números, por ejemplo: 45000.
             Si no lo recuerdas, escribe "no sé".""");
+    }
+
+    private void preguntarValorPago(String from, ConversacionCliente conv) {
+        conv.paso = PEDIDO_VALOR_TEXTO;
+        enviarMensaje(from, """
+            💳 ¿Cuánto pagaste? Escribe el valor en números, por ejemplo: 45000.""");
     }
 
     private void procesarTextoEntrante(String from, String contenido) {
@@ -232,15 +246,23 @@ public class WhatsAppServiceImpl implements WhatsAppService {
                 conv.concepto = contenido.trim();
                 preguntarValor(from, conv);
             } else if (conv.paso == PEDIDO_VALOR_TEXTO) {
-                if (esNoSe(contenido)) {
+                if (conv.soportePago) {
+                    var valor = extraerNumero(contenido);
+                    if (valor == null) {
+                        enviarMensaje(from, "No entendí el valor 🤔 Escribe solo números, por ejemplo: 45000");
+                    } else {
+                        registrarAbonoDesdeBot(from, conv, valor);
+                    }
+                } else if (esNoSe(contenido)) {
                     registrarCargoDesdeBot(from, conv, null);
                     return;
-                }
-                var valor = extraerNumero(contenido);
-                if (valor == null) {
-                    enviarMensaje(from, "No entendí el valor 🤔 Escribe solo números, por ejemplo: 45000");
                 } else {
-                    registrarCargoDesdeBot(from, conv, valor);
+                    var valor = extraerNumero(contenido);
+                    if (valor == null) {
+                        enviarMensaje(from, "No entendí el valor 🤔 Escribe solo números, por ejemplo: 45000");
+                    } else {
+                        registrarCargoDesdeBot(from, conv, valor);
+                    }
                 }
             }
         }
@@ -309,10 +331,11 @@ public class WhatsAppServiceImpl implements WhatsAppService {
         conv.mimeType = mimeType;
         conversaciones.put(from, conv);
         enviarBotones(from, """
-            📸 Recibí tu foto. ¿Quieres apartar esta prenda?""",
+            📸 Recibí tu foto. ¿Qué quieres hacer?""",
             List.of(
-                Map.of("id", "si_foto", "title", "✅ Sí, la quiero"),
-                Map.of("id", "no_foto", "title", "❌ No")
+                Map.of("id", "si_foto",       "title", "✅ Apartar esta prenda"),
+                Map.of("id", "soporte_pago",  "title", "💳 Es un soporte de pago"),
+                Map.of("id", "no_foto",       "title", "❌ Nada, gracias")
             ));
     }
 
@@ -363,6 +386,13 @@ public class WhatsAppServiceImpl implements WhatsAppService {
                 Map.of("id", "apartar_solo", "title", "✅ No, solo apartarlo"),
                 Map.of("id", "asesora",      "title", "💬 Hablar con asesor")
             ));
+    }
+
+    private void registrarAbonoDesdeBot(String from, ConversacionCliente conv, Long valor) {
+        cuentaService.registrarAbonoDesdeBot(from, valor, conv.mediaId, conv.mediaPath, conv.mimeType);
+        conversaciones.remove(from);
+        enviarMensaje(from, "💳 ¡Listo! Registramos tu soporte de pago por $%d. La foto quedó en tu cuenta y la revisaremos para confirmarla. 💜"
+                .formatted(valor));
     }
 
     private Long extraerNumero(String s) {

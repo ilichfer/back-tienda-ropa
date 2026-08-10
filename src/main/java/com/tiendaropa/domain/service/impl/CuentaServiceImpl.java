@@ -60,6 +60,25 @@ public class CuentaServiceImpl implements CuentaService {
 
     @Override
     @Transactional
+    public CuentaMovimientoResponse registrarAbonoDesdeBot(String whatsapp, Long valor,
+                                                           String mediaId, String mediaPath, String mimeType) {
+        var cuenta = getOrCreateCuenta(whatsapp);
+        var mov = movRepo.save(CuentaMovimiento.builder()
+                .cuenta(cuenta)
+                .tipo("ABONO")
+                .concepto("Soporte de pago")
+                .valor(valor)
+                .estado("PENDIENTE_VALIDAR")
+                .mediaId(mediaId)
+                .mediaPath(mediaPath)
+                .mimeType(mimeType)
+                .build());
+        log.info("ABONO por soporte de pago en cuenta {} ({}): ${}", cuenta.getId(), whatsapp, valor);
+        return CuentaMovimientoResponse.from(mov);
+    }
+
+    @Override
+    @Transactional
     public CuentaMovimientoResponse registrarAbono(UUID cuentaId, Long valor, String referencia, String metodo) {
         var cuenta = cuentaRepo.findById(cuentaId)
                 .orElseThrow(() -> new IllegalArgumentException("Cuenta no encontrada"));

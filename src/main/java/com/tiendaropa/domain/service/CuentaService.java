@@ -15,6 +15,9 @@ public interface CuentaService {
     CuentaMovimientoResponse registrarCargo(String whatsapp, String concepto, Long valor,
                                             String mediaId, String mediaPath, String mimeType);
 
+    CuentaMovimientoResponse registrarAbonoDesdeBot(String whatsapp, Long valor,
+                                                    String mediaId, String mediaPath, String mimeType);
+
     CuentaMovimientoResponse registrarAbono(UUID cuentaId, Long valor, String referencia, String metodo);
 
     CuentaMovimientoResponse completarValor(UUID movimientoId, Long valor);
