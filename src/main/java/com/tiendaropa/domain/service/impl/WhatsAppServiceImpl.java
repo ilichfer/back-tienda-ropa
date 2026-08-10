@@ -45,9 +45,8 @@ public class WhatsAppServiceImpl implements WhatsAppService {
 
     private static final int PEDIDO_CONFIRMAR_FOTO = 0;
     private static final int PEDIDO_NOMBRE         = 1;
-    private static final int PEDIDO_VALOR          = 2;
-    private static final int PEDIDO_VALOR_TEXTO    = 3;
-    private static final int PEDIDO_ENVIO          = 4;
+    private static final int PEDIDO_VALOR_TEXTO    = 2;
+    private static final int PEDIDO_ENVIO          = 3;
 
     private static class ConversacionCliente {
         String flujo;
@@ -102,13 +101,6 @@ public class WhatsAppServiceImpl implements WhatsAppService {
                         contenido = title;
                         tipo = "button_" + id;
                         log.info("WA botón [{}]: {} ({})", from, title, id);
-                    } else if ("list_reply".equals(sub)) {
-                        var lr     = inter.get("list_reply");
-                        var id     = lr.get("id").asText();
-                        var title  = lr.get("title").asText();
-                        contenido = title;
-                        tipo = "list_" + id;
-                        log.info("WA lista [{}]: {} ({})", from, title, id);
                     } else {
                         log.info("WA interactive ignorado [{}]: {}", from, sub);
                         return;
@@ -152,7 +144,7 @@ public class WhatsAppServiceImpl implements WhatsAppService {
                     .mimeType(mimeType.isBlank() ? null : mimeType)
                     .build());
 
-            if (tipo.startsWith("button_") || tipo.startsWith("list_")) {
+            if (tipo.startsWith("button_")) {
                 procesarBoton(from, tipo, contenido, cliente);
             } else if (tipo.equals("text")) {
                 procesarTextoEntrante(from, contenido);
@@ -187,11 +179,6 @@ public class WhatsAppServiceImpl implements WhatsAppService {
     }
 
     private void procesarBoton(String from, String tipo, String contenido, Cliente cliente) {
-        if (tipo.startsWith("list_")) {
-            procesarLista(from, tipo);
-            return;
-        }
-
         switch (tipo) {
             case "button_envio" -> iniciarFlujoEnvio(from);
             case "button_asesora" -> {
@@ -202,8 +189,7 @@ public class WhatsAppServiceImpl implements WhatsAppService {
             case "button_si_foto" -> {
                 var conv = conversaciones.get(from);
                 if (conv != null && FLUJO_PEDIDO.equals(conv.flujo) && conv.paso == PEDIDO_CONFIRMAR_FOTO) {
-                    conv.paso = PEDIDO_VALOR;
-                    enviarOpcionesValor(from);
+                    preguntarValor(from, conv);
                 }
             }
             case "button_no_foto" -> {
@@ -218,23 +204,11 @@ public class WhatsAppServiceImpl implements WhatsAppService {
         }
     }
 
-    private void procesarLista(String from, String tipo) {
-        var conv = conversaciones.get(from);
-        if (conv == null || !FLUJO_PEDIDO.equals(conv.flujo) || conv.paso != PEDIDO_VALOR) return;
-
-        if (tipo.equals("list_valor_nose")) {
-            registrarCargoDesdeBot(from, conv, null);
-        } else if (tipo.equals("list_valor_otro")) {
-            conv.paso = PEDIDO_VALOR_TEXTO;
-            enviarMensaje(from, "¿Cuánto cuesta la prenda? Escribe el valor solo en números, por ejemplo: 45000");
-        } else if (tipo.startsWith("list_valor_")) {
-            try {
-                long valor = Long.parseLong(tipo.substring("list_valor_".length()));
-                registrarCargoDesdeBot(from, conv, valor);
-            } catch (NumberFormatException e) {
-                log.warn("Valor de lista no numérico [{}]: {}", from, tipo);
-            }
-        }
+    private void preguntarValor(String from, ConversacionCliente conv) {
+        conv.paso = PEDIDO_VALOR_TEXTO;
+        enviarMensaje(from, """
+            ¿Cuánto cuesta la prenda? Escribe el valor en números, por ejemplo: 45000.
+            Si no lo recuerdas, escribe "no sé".""");
     }
 
     private void procesarTextoEntrante(String from, String contenido) {
@@ -255,9 +229,12 @@ public class WhatsAppServiceImpl implements WhatsAppService {
         if (FLUJO_PEDIDO.equals(conv.flujo)) {
             if (conv.paso == PEDIDO_NOMBRE) {
                 conv.concepto = contenido.trim();
-                conv.paso = PEDIDO_VALOR;
-                enviarOpcionesValor(from);
+                preguntarValor(from, conv);
             } else if (conv.paso == PEDIDO_VALOR_TEXTO) {
+                if (esNoSe(contenido)) {
+                    registrarCargoDesdeBot(from, conv, null);
+                    return;
+                }
                 var valor = extraerNumero(contenido);
                 if (valor == null) {
                     enviarMensaje(from, "No entendí el valor 🤔 Escribe solo números, por ejemplo: 45000");
@@ -266,6 +243,12 @@ public class WhatsAppServiceImpl implements WhatsAppService {
                 }
             }
         }
+    }
+
+    private boolean esNoSe(String contenido) {
+        if (contenido == null) return false;
+        var t = contenido.toLowerCase().trim();
+        return t.equals("no se") || t.equals("no sé") || t.equals("nose") || t.equals("no se el valor") || t.equals("no se cuanto vale");
     }
 
     private void procesarTextoEnvio(String from, ConversacionCliente conv, String contenido) {
@@ -381,25 +364,6 @@ public class WhatsAppServiceImpl implements WhatsAppService {
             ));
     }
 
-    private void enviarOpcionesValor(String from) {
-        enviarLista(from,
-            "¿Cuánto cuesta la prenda? Selecciona una opción:",
-            "Seleccionar valor",
-            "Valor de la prenda",
-            List.of(
-                Map.of("id", "valor_15000", "title", "$15.000"),
-                Map.of("id", "valor_20000", "title", "$20.000"),
-                Map.of("id", "valor_25000", "title", "$25.000"),
-                Map.of("id", "valor_30000", "title", "$30.000"),
-                Map.of("id", "valor_35000", "title", "$35.000"),
-                Map.of("id", "valor_40000", "title", "$40.000"),
-                Map.of("id", "valor_50000", "title", "$50.000"),
-                Map.of("id", "valor_60000", "title", "$60.000"),
-                Map.of("id", "valor_otro", "title", "💰 Otro valor"),
-                Map.of("id", "valor_nose", "title", "🙈 No sé el valor")
-            ));
-    }
-
     private Long extraerNumero(String s) {
         var sb = new StringBuilder();
         for (char c : s.toCharArray()) if (Character.isDigit(c)) sb.append(c);
@@ -482,52 +446,6 @@ public class WhatsAppServiceImpl implements WhatsAppService {
         } catch (Exception e) {
             log.error("Error enviando botones WA a {}", destinatario, e);
             throw new RuntimeException("Error enviando botones WhatsApp: " + e.getMessage(), e);
-        }
-    }
-
-    @Override
-    public void enviarLista(String destinatario, String texto, String botonAccion, String tituloSeccion,
-                            List<Map<String, String>> opciones) {
-        var rows = opciones.stream()
-            .map(o -> Map.of("id", o.get("id"), "title", o.get("title")))
-            .toList();
-
-        var body = Map.of(
-            "messaging_product", "whatsapp",
-            "to", destinatario,
-            "type", "interactive",
-            "interactive", Map.of(
-                "type", "list",
-                "body", Map.of("text", texto),
-                "action", Map.of(
-                    "button", botonAccion,
-                    "sections", new Object[]{
-                        Map.of("title", tituloSeccion, "rows", rows)
-                    }
-                )
-            )
-        );
-
-        try {
-            var r = whatsappWebClient.post()
-                .uri("/{phoneId}/messages", phoneNumberId)
-                .header("Authorization", "Bearer " + accessToken)
-                .bodyValue(body)
-                .retrieve()
-                .bodyToMono(JsonNode.class)
-                .block();
-
-            var titulos = opciones.stream().map(o -> o.get("title")).reduce((a, b1) -> a + " | " + b1).orElse("");
-            mensajeRepo.save(WaMensaje.builder()
-                    .whatsappFrom(destinatario)
-                    .contenido(texto + "\n📋 [" + titulos + "]")
-                    .tipo("list")
-                    .direccion("SALIDA")
-                    .waMessageId(r.get("messages").get(0).get("id").asText())
-                    .build());
-        } catch (Exception e) {
-            log.error("Error enviando lista WA a {}", destinatario, e);
-            throw new RuntimeException("Error enviando lista WhatsApp: " + e.getMessage(), e);
         }
     }
 
