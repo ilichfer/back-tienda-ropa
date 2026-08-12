@@ -92,9 +92,11 @@ CREATE TABLE IF NOT EXISTS wa_mensajes (
     media_id        VARCHAR(255),
     media_path      VARCHAR(500),
     mime_type       VARCHAR(80),
+    leido           BOOLEAN DEFAULT FALSE,
     created_at      TIMESTAMPTZ DEFAULT now()
 ) //
 DO $$ BEGIN ALTER TABLE wa_mensajes ADD COLUMN IF NOT EXISTS media_path VARCHAR(500); EXCEPTION WHEN others THEN NULL; END; $$ //
+DO $$ BEGIN ALTER TABLE wa_mensajes ADD COLUMN IF NOT EXISTS leido BOOLEAN DEFAULT FALSE; EXCEPTION WHEN others THEN NULL; END; $$ //
 
 -- Plantillas de respuesta rápida
 CREATE TABLE IF NOT EXISTS wa_plantillas (

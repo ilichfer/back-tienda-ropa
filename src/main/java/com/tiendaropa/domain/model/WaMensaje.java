@@ -43,6 +43,10 @@ public class WaMensaje {
     @Column(length = 80)
     private String mimeType;
 
+    @Column(name = "leido")
+    @Builder.Default
+    private Boolean leido = false;
+
     @Column(insertable = false, updatable = false)
     private Instant createdAt;
 }

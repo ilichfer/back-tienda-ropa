@@ -140,6 +140,7 @@ public class WhatsAppServiceImpl implements WhatsAppService {
             }
 
             var cliente = clienteRepo.findByWhatsapp(from).orElse(null);
+            var primerMensaje = !mensajeRepo.existsByWhatsappFrom(from);
             mensajeRepo.save(WaMensaje.builder()
                     .whatsappFrom(from)
                     .cliente(cliente)
@@ -169,7 +170,12 @@ public class WhatsAppServiceImpl implements WhatsAppService {
                         && ChronoUnit.HOURS.between(ultima, Instant.now()) >= 2;
                 if (convVieja) conversaciones.remove(from);
 
-                if (!conversaciones.containsKey(from)
+                if (primerMensaje) {
+                    enviarMensaje(from, """
+                        ¡Hola! 👋 Bienvenido/a al Patio de Ropa Jireh 🛍️💜
+
+                        Para poder atenderte mejor, por favor me regalas tu usuario de TikTok y tu nombre completo 😊""");
+                } else if (!conversaciones.containsKey(from)
                         && (ultima == null || ChronoUnit.HOURS.between(ultima, Instant.now()) >= 12)) {
                     enviarBotones(from, """
                         ¡Hola! 👗 ¿En qué puedo ayudarte?""",

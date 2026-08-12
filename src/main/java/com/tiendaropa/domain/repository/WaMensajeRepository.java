@@ -2,7 +2,9 @@ package com.tiendaropa.domain.repository;
 
 import com.tiendaropa.domain.model.WaMensaje;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Optional;
@@ -19,4 +21,11 @@ public interface WaMensajeRepository extends JpaRepository<WaMensaje, UUID> {
     List<WaMensaje> findByWhatsappFromConCliente(String whatsappFrom);
 
     Optional<WaMensaje> findFirstByWhatsappFromAndDireccionOrderByCreatedAtDesc(String whatsappFrom, String direccion);
+
+    boolean existsByWhatsappFrom(String whatsappFrom);
+
+    @Modifying
+    @Transactional
+    @Query("UPDATE WaMensaje m SET m.leido = true WHERE m.whatsappFrom = :whatsappFrom AND m.direccion = 'ENTRADA'")
+    int marcarLeidas(String whatsappFrom);
 }

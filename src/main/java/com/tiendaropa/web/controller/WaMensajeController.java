@@ -50,6 +50,14 @@ public class WaMensajeController {
         whatsAppService.enviarMensaje(to, texto);
     }
 
+    @PostMapping("/leer")
+    public void marcarLeidas(@RequestBody Map<String, String> body) {
+        var whatsappFrom = body.get("whatsappFrom");
+        if (whatsappFrom == null || whatsappFrom.isBlank())
+            throw new IllegalArgumentException("'whatsappFrom' es requerido");
+        waMensajeRepo.marcarLeidas(whatsappFrom);
+    }
+
     @PutMapping("/cliente")
     public void actualizarCliente(@RequestBody Map<String, String> body) {
         var whatsappFrom = body.get("whatsappFrom");
