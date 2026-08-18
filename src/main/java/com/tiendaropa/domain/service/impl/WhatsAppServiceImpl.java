@@ -9,6 +9,7 @@ import com.tiendaropa.domain.repository.WaMensajeRepository;
 import com.tiendaropa.domain.service.CuentaService;
 import com.tiendaropa.domain.service.EnvioService;
 import com.tiendaropa.domain.service.WhatsAppService;
+import com.tiendaropa.domain.service.ia.AgenteIA;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -45,6 +46,7 @@ public class WhatsAppServiceImpl implements WhatsAppService {
     private final EnvioService envioService;
     private final SolicitudEnvioRepository solicitudRepo;
     private final CuentaService cuentaService;
+    private final java.util.Optional<AgenteIA> agenteIA;
 
     private static final String FLUJO_ENVIO  = "ENVIO";
     private static final String FLUJO_PEDIDO = "PEDIDO";
@@ -244,7 +246,9 @@ public class WhatsAppServiceImpl implements WhatsAppService {
         if (conv == null) {
             if (esIntencionPedido(contenido)) {
                 iniciarFlujoPedidoTexto(from);
+                return;
             }
+            responderConAgenteIA(from, contenido);
             return;
         }
 
@@ -278,6 +282,55 @@ public class WhatsAppServiceImpl implements WhatsAppService {
                 }
             }
         }
+    }
+
+    private void responderConAgenteIA(String from, String contenido) {
+        if (agenteIA.isEmpty()) return;
+
+        try {
+            var contexto = construirContexto(from);
+            var respuesta = agenteIA.get().responder(contenido, contexto);
+            if (respuesta.isPresent()) {
+                enviarMensaje(from, respuesta.get());
+            } else {
+                enviarBotones(from, "¿En qué puedo ayudarte?",
+                    List.of(
+                        Map.of("id", "envio",   "title", "📦 Quiero mi envío"),
+                        Map.of("id", "asesora",  "title", "💬 Hablar con asesor")
+                    ));
+            }
+        } catch (Exception e) {
+            log.error("Error en agente IA para {}", from, e);
+            enviarMensaje(from, "Disculpa, no pude procesar tu mensaje. Intenta de nuevo o habla con un asesor. 💬");
+        }
+    }
+
+    private String construirContexto(String from) {
+        var sb = new StringBuilder();
+        sb.append("Cliente con teléfono: ").append(from).append("\n");
+
+        var cliente = clienteRepo.findByWhatsapp(from).orElse(null);
+        if (cliente != null) {
+            if (cliente.getNombre() != null) sb.append("Nombre: ").append(cliente.getNombre()).append("\n");
+            if (cliente.getCiudad() != null) sb.append("Ciudad: ").append(cliente.getCiudad()).append("\n");
+        }
+
+        var ultimosMensajes = mensajeRepo.findByWhatsappFromConCliente(from);
+        if (ultimosMensajes != null && !ultimosMensajes.isEmpty()) {
+            var recientes = ultimosMensajes.stream()
+                    .filter(m -> m.getDireccion() != null)
+                    .sorted((a, b) -> b.getCreatedAt().compareTo(a.getCreatedAt()))
+                    .limit(10)
+                    .toList();
+            if (!recientes.isEmpty()) {
+                sb.append("\nÚltimos mensajes de la conversación:\n");
+                for (var m : recientes) {
+                    var dir = "ENTRADA".equals(m.getDireccion()) ? "Cliente" : "Tú";
+                    sb.append(dir).append(": ").append(m.getContenido()).append("\n");
+                }
+            }
+        }
+        return sb.toString();
     }
 
     private boolean esNoSe(String contenido) {
