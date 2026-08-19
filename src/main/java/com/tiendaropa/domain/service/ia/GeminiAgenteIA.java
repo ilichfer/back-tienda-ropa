@@ -115,8 +115,8 @@ public class GeminiAgenteIA implements AgenteIA {
 
             var body = construirBody(contents, null);
 
-            log.info("[GEMINI] Enviando imagen para análisis con gemini-2.5-flash-image...");
-            var response = llamarConReintentos(body, "gemini-2.5-flash-image");
+            log.info("[GEMINI] Enviando imagen para análisis...");
+            var response = llamarConReintentos(body);
 
             var textoOpt = extraerTexto(response);
             if (textoOpt.isEmpty()) {
