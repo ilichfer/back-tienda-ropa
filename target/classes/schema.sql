@@ -92,8 +92,11 @@ CREATE TABLE IF NOT EXISTS wa_mensajes (
     media_id        VARCHAR(255),
     media_path      VARCHAR(500),
     mime_type       VARCHAR(80),
+    leido           BOOLEAN DEFAULT FALSE,
     created_at      TIMESTAMPTZ DEFAULT now()
 ) //
+DO $$ BEGIN ALTER TABLE wa_mensajes ADD COLUMN IF NOT EXISTS media_path VARCHAR(500); EXCEPTION WHEN others THEN NULL; END; $$ //
+DO $$ BEGIN ALTER TABLE wa_mensajes ADD COLUMN IF NOT EXISTS leido BOOLEAN DEFAULT FALSE; EXCEPTION WHEN others THEN NULL; END; $$ //
 
 -- Plantillas de respuesta rápida
 CREATE TABLE IF NOT EXISTS wa_plantillas (
@@ -155,3 +158,30 @@ CREATE INDEX IF NOT EXISTS idx_solicitudes_envio_estado ON solicitudes_envio(est
 
 DROP TRIGGER IF EXISTS trg_solicitudes_envio_upd ON solicitudes_envio //
 CREATE TRIGGER trg_solicitudes_envio_upd BEFORE UPDATE ON solicitudes_envio FOR EACH ROW EXECUTE FUNCTION set_updated_at() //
+
+-- Cuentas por cobrar (una por cliente)
+CREATE TABLE IF NOT EXISTS cuentas (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    cliente_id  UUID UNIQUE NOT NULL REFERENCES clientes(id),
+    created_at  TIMESTAMPTZ DEFAULT now(),
+    updated_at  TIMESTAMPTZ DEFAULT now()
+) //
+
+-- Movimientos de cuenta: CARGO (prenda que pidió) y ABONO (pago recibido)
+CREATE TABLE IF NOT EXISTS cuentas_movimientos (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    cuenta_id   UUID NOT NULL REFERENCES cuentas(id),
+    tipo        VARCHAR(10) NOT NULL,
+    concepto    VARCHAR(200),
+    valor       BIGINT,
+    estado      VARCHAR(30) NOT NULL DEFAULT 'PENDIENTE',
+    referencia  VARCHAR(120),
+    metodo      VARCHAR(30),
+    media_id    VARCHAR(255),
+    media_path  VARCHAR(500),
+    mime_type   VARCHAR(80),
+    created_at  TIMESTAMPTZ DEFAULT now()
+) //
+
+CREATE INDEX IF NOT EXISTS idx_cuentas_mov_cuenta ON cuentas_movimientos(cuenta_id) //
+CREATE INDEX IF NOT EXISTS idx_cuentas_mov_estado  ON cuentas_movimientos(estado) //

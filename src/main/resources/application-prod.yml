@@ -10,3 +10,25 @@ whatsapp:
   verify-token: ${WHATSAPP_VERIFY_TOKEN}
   business-account-id: ${WHATSAPP_BUSINESS_ACCOUNT_ID}
   media-dir: ${WHATSAPP_MEDIA_DIR:./media}
+
+agente-ia:
+  provider: ${AGENTE_IA_PROVIDER:ninguno}
+  system-prompt: >
+    Eres la asesora virtual de "Patio de Ropa Jireh", una tienda de ropa en Colombia.
+    Tu nombre es Jireh. Eres amable, cálida y profesional.
+    Ayudas a los clientes con: información de prendas, tallas, precios, disponibilidad,
+    procesos de compra, apartados, pagos y envíos.
+    Si un cliente quiere apartar una prenda, sugerirle que escriba "apartar" o enviar una foto.
+    Si quiere un envío, sugerirle el botón "Quiero mi envío".
+    Si necesita hablar con una persona, sugerirle "Hablar con asesor".
+    Sé concisa en tus respuestas (máximo 2-3 oraciones).
+    No inventes precios ni disponibilidad que no conozcas.
+    Responde siempre en español.
+  groq:
+    api-key: ${GROQ_API_KEY:}
+    model: ${GROQ_MODEL:llama-3.3-70b-versatile}
+    base-url: ${GROQ_BASE_URL:https://api.groq.com}
+  gemini:
+    api-key: ${GEMINI_API_KEY:}
+    model: ${GEMINI_MODEL:gemini-2.5-flash}
+    base-url: ${GEMINI_BASE_URL:https://generativelanguage.googleapis.com}

@@ -9,8 +9,10 @@ import com.tiendaropa.domain.repository.WaMensajeRepository;
 import com.tiendaropa.domain.service.CuentaService;
 import com.tiendaropa.domain.service.EnvioService;
 import com.tiendaropa.domain.service.WhatsAppService;
+import com.tiendaropa.domain.service.ia.AgenteIA;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -45,6 +47,16 @@ public class WhatsAppServiceImpl implements WhatsAppService {
     private final EnvioService envioService;
     private final SolicitudEnvioRepository solicitudRepo;
     private final CuentaService cuentaService;
+    private final ObjectProvider<AgenteIA> agenteIAProvider;
+
+    @jakarta.annotation.PostConstruct
+    public void init() {
+        var agente = agenteIAProvider.getIfAvailable();
+        log.info("=========================================");
+        log.info("[WA-SERVICE] agenteIA.isPresent={}", agente != null);
+        if (agente != null) log.info("[WA-SERVICE] Agente: {}", agente.nombre());
+        log.info("=========================================");
+    }
 
     private static final String FLUJO_ENVIO  = "ENVIO";
     private static final String FLUJO_PEDIDO = "PEDIDO";
@@ -152,15 +164,24 @@ public class WhatsAppServiceImpl implements WhatsAppService {
                     .mimeType(mimeType.isBlank() ? null : mimeType)
                     .build());
 
+            log.info("=== WEBHOOK WA === from={} type={} primerMensaje={}", from, tipo, primerMensaje);
+
             if (tipo.startsWith("button_")) {
+                log.info("[FLUJO] Botón detectado, procesando...");
                 procesarBoton(from, tipo, contenido, cliente);
             } else if (tipo.equals("text")) {
-                procesarTextoEntrante(from, contenido);
-            } else if (tipo.equals("image")) {
-                var conv = conversaciones.get(from);
-                if (conv == null || FLUJO_PEDIDO.equals(conv.flujo)) {
-                    iniciarFlujoPedidoFoto(from, mediaId, mimeType);
+                log.info("[FLUJO] Texto entrante, llamando procesarTextoEntrante...");
+                var agenteRespondio = procesarTextoEntrante(from, contenido);
+                log.info("[FLUJO] procesarTextoEntrante devolvió agenteRespondio={}", agenteRespondio);
+                if (agenteRespondio) {
+                    log.info("[FLUJO] Agente IA respondió, saltando saludos hardcoded");
+                    ultimaInteraccion.put(from, Instant.now());
+                    return;
                 }
+                log.info("[FLUJO] Sin agente IA, continúa con saludos hardcoded");
+            } else if (tipo.equals("image")) {
+                log.info("[FLUJO] Imagen recibida, procesando con agente IA...");
+                procesarImagenConIA(from, mediaId, mimeType);
             }
 
             if (tipo.equals("text")) {
@@ -238,19 +259,23 @@ public class WhatsAppServiceImpl implements WhatsAppService {
             💳 ¿Cuánto pagaste? Escribe el valor en números, por ejemplo: 45000.""");
     }
 
-    private void procesarTextoEntrante(String from, String contenido) {
+    private boolean procesarTextoEntrante(String from, String contenido) {
         var conv = conversaciones.get(from);
+        log.info("[TEXTO] from={} convActiva={} contenido='{}'", from, conv != null, contenido);
 
         if (conv == null) {
             if (esIntencionPedido(contenido)) {
+                log.info("[TEXTO] Intención de pedido detectada, iniciando flujo PEDIDO");
                 iniciarFlujoPedidoTexto(from);
+                return false;
             }
-            return;
+            log.info("[TEXTO] Sin conversación activa ni intención de pedido, intentando agente IA...");
+            return responderConAgenteIA(from, contenido);
         }
 
         if (FLUJO_ENVIO.equals(conv.flujo)) {
             procesarTextoEnvio(from, conv, contenido);
-            return;
+            return false;
         }
 
         if (FLUJO_PEDIDO.equals(conv.flujo)) {
@@ -267,7 +292,7 @@ public class WhatsAppServiceImpl implements WhatsAppService {
                     }
                 } else if (esNoSe(contenido)) {
                     registrarCargoDesdeBot(from, conv, null);
-                    return;
+                    return false;
                 } else {
                     var valor = extraerNumero(contenido);
                     if (valor == null) {
@@ -278,6 +303,162 @@ public class WhatsAppServiceImpl implements WhatsAppService {
                 }
             }
         }
+        return false;
+    }
+
+    private boolean responderConAgenteIA(String from, String contenido) {
+        var agente = agenteIAProvider.getIfAvailable();
+        log.info("[IA] Verificando agente IA... agenteIA.isPresent={}", agente != null);
+        if (agente == null) {
+            log.info("[IA] No hay agente IA configurado, retornando false");
+            return false;
+        }
+
+        try {
+            log.info("[IA] Agente IA disponible: {}, construyendo contexto...", agente.nombre());
+            var contexto = construirContexto(from);
+            log.info("[IA] Contexto construido ({} chars), llamando a Gemini...", contexto.length());
+            var respuesta = agente.responder(contenido, contexto);
+            log.info("[IA] Gemini devolvió respuesta presente={}", respuesta.isPresent());
+            if (respuesta.isPresent()) {
+                var texto = respuesta.get();
+                log.info("[IA] Enviando respuesta IA: '{}'", texto.substring(0, Math.min(100, texto.length())));
+
+                if (texto.contains("[SOLICITAR_ENVIO]")) {
+                    log.info("[IA] Detectada solicitud de envío, iniciando flujo ENVIO");
+                    var mensajeLimpio = texto.replace("[SOLICITAR_ENVIO]", "").trim();
+                    enviarMensaje(from, mensajeLimpio);
+                    iniciarFlujoEnvio(from);
+                    return true;
+                }
+
+                enviarMensaje(from, texto);
+                return true;
+            } else {
+                log.warn("[IA] Gemini no devolvió respuesta, enviando botones de fallback");
+                enviarBotones(from, "¿En qué puedo ayudarte?",
+                    List.of(
+                        Map.of("id", "envio",   "title", "📦 Quiero mi envío"),
+                        Map.of("id", "asesora",  "title", "💬 Hablar con asesor")
+                    ));
+                return true;
+            }
+        } catch (Exception e) {
+            log.error("[IA] Error en agente IA para {}", from, e);
+            enviarMensaje(from, "Disculpa, no pude procesar tu mensaje. Intenta de nuevo o habla con un asesor. 💬");
+            return true;
+        }
+    }
+
+    private void procesarImagenConIA(String from, String mediaId, String mimeType) {
+        var agente = agenteIAProvider.getIfAvailable();
+        if (agente == null) {
+            log.info("[IA] No hay agente IA, procesando imagen con flujo legacy");
+            var conv = conversaciones.get(from);
+            if (conv == null || FLUJO_PEDIDO.equals(conv.flujo)) {
+                iniciarFlujoPedidoFoto(from, mediaId, mimeType);
+            }
+            return;
+        }
+
+        try {
+            var bytes = descargarImagenBytes(mediaId);
+            if (bytes == null || bytes.length == 0) {
+                log.warn("[IA] No se pudo descargar la imagen {}", mediaId);
+                enviarMensaje(from, "No pude recibir la imagen. Intenta enviarla de nuevo. 📷");
+                return;
+            }
+
+            log.info("[IA] Imagen descargada ({} bytes), enviando a Gemini para análisis...", bytes.length);
+            var contexto = construirContexto(from);
+            var analisis = agente.analizarImagen(bytes, mimeType, contexto);
+
+            if (analisis.isEmpty()) {
+                log.warn("[IA] Gemini no pudo analizar la imagen, enviando fallback");
+                enviarMensaje(from, "No pude identificar la imagen. ¿Es una foto de la prenda o un comprobante de pago? 💬");
+                return;
+            }
+
+            var resultado = analisis.get();
+            log.info("[IA] Imagen clasificada como: {}", resultado.tipo());
+
+            if (resultado.esPrenda()) {
+                var conv = new ConversacionCliente();
+                conv.flujo = FLUJO_PEDIDO;
+                conv.paso = PEDIDO_CONFIRMAR_FOTO;
+                conv.mediaId = mediaId;
+                conv.mimeType = mimeType;
+                conversaciones.put(from, conv);
+                enviarMensaje(from, resultado.respuesta());
+            } else if (resultado.esComprobante()) {
+                var conv = conversaciones.get(from);
+                if (conv != null && FLUJO_PEDIDO.equals(conv.flujo)) {
+                    conv.mediaPath = descargarMediaLocal(mediaId);
+                    conv.mimeType = mimeType;
+                    registrarAbonoDesdeBot(from, conv, null);
+                } else {
+                    enviarMensaje(from, resultado.respuesta());
+                }
+            } else {
+                enviarMensaje(from, resultado.respuesta());
+            }
+
+        } catch (Exception e) {
+            log.error("[IA] Error procesando imagen con IA para {}", from, e);
+            enviarMensaje(from, "No pude procesar la imagen. Intenta de nuevo o habla con un asesor. 💬");
+        }
+    }
+
+    private byte[] descargarImagenBytes(String mediaId) {
+        if (mediaId == null || mediaId.isBlank()) return null;
+        try {
+            var meta = whatsappWebClient.get()
+                .uri("/{mediaId}", mediaId)
+                .header("Authorization", "Bearer " + accessToken)
+                .retrieve()
+                .bodyToMono(JsonNode.class)
+                .block();
+            var urlStr = meta.has("url") ? meta.get("url").asText() : null;
+            if (urlStr == null) return null;
+
+            return whatsappWebClient.get()
+                .uri(urlStr)
+                .header("Authorization", "Bearer " + accessToken)
+                .retrieve()
+                .bodyToMono(byte[].class)
+                .block();
+        } catch (Exception e) {
+            log.warn("No se pudo descargar bytes de media {}: {}", mediaId, e.getMessage());
+            return null;
+        }
+    }
+
+    private String construirContexto(String from) {
+        var sb = new StringBuilder();
+        sb.append("Cliente con teléfono: ").append(from).append("\n");
+
+        var cliente = clienteRepo.findByWhatsapp(from).orElse(null);
+        if (cliente != null) {
+            if (cliente.getNombre() != null) sb.append("Nombre: ").append(cliente.getNombre()).append("\n");
+            if (cliente.getCiudad() != null) sb.append("Ciudad: ").append(cliente.getCiudad()).append("\n");
+        }
+
+        var ultimosMensajes = mensajeRepo.findByWhatsappFromConCliente(from);
+        if (ultimosMensajes != null && !ultimosMensajes.isEmpty()) {
+            var recientes = ultimosMensajes.stream()
+                    .filter(m -> m.getDireccion() != null && m.getCreatedAt() != null)
+                    .sorted((a, b) -> b.getCreatedAt().compareTo(a.getCreatedAt()))
+                    .limit(10)
+                    .toList();
+            if (!recientes.isEmpty()) {
+                sb.append("\nÚltimos mensajes de la conversación:\n");
+                for (var m : recientes) {
+                    var dir = "ENTRADA".equals(m.getDireccion()) ? "Cliente" : "Tú";
+                    sb.append(dir).append(": ").append(m.getContenido()).append("\n");
+                }
+            }
+        }
+        return sb.toString();
     }
 
     private boolean esNoSe(String contenido) {
@@ -409,8 +590,12 @@ public class WhatsAppServiceImpl implements WhatsAppService {
         }
         cuentaService.registrarAbonoDesdeBot(from, valor, conv.mediaId, conv.mediaPath, conv.mimeType);
         conversaciones.remove(from);
-        enviarMensaje(from, "💳 ¡Listo! Registramos tu soporte de pago por $%d. La foto quedó en tu cuenta y la revisaremos para confirmarla. 💜"
-                .formatted(valor));
+        if (valor != null) {
+            enviarMensaje(from, "💳 ¡Listo! Registramos tu soporte de pago por $%d. La foto quedó en tu cuenta y la revisaremos para confirmarla. 💜"
+                    .formatted(valor));
+        } else {
+            enviarMensaje(from, "💳 ¡Listo! Registramos tu comprobante de pago. La foto quedó en tu cuenta y la revisaremos para confirmarla. 💜");
+        }
     }
 
     private String descargarMediaLocal(String mediaId) {
