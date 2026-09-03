@@ -34,6 +34,11 @@ public class WaMensaje {
     @Column(length = 120)
     private String waMessageId;
 
+    // wa_message_id del mensaje que este está citando/respondiendo (la acción de WhatsApp Web
+    // de "responder citando"), o null si es un mensaje normal sin cita.
+    @Column(name = "context_wa_message_id", length = 120)
+    private String contextWaMessageId;
+
     @Column(length = 255)
     private String mediaId;
 

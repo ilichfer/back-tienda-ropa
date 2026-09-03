@@ -47,7 +47,10 @@ public class WaMensajeController {
         if (to == null || to.isBlank()) throw new IllegalArgumentException("'to' es requerido");
         var texto = body.get("texto");
         if (texto == null || texto.isBlank()) throw new IllegalArgumentException("'texto' es requerido");
-        whatsAppService.enviarMensaje(to, texto);
+        // Opcional: wa_message_id del mensaje que se está citando ("Responder" desde el panel,
+        // igual que en WhatsApp Web). Si no viene, es un mensaje normal sin cita.
+        var replyToWaMessageId = body.get("replyToWaMessageId");
+        whatsAppService.enviarMensaje(to, texto, replyToWaMessageId);
 
         // La marca naranja de "requiere asesor" se quita cuando el asesor REALMENTE gestiona
         // el chat (le responde algo), no solo por abrirlo a mirarlo — antes se quitaba con

@@ -11,6 +11,12 @@ public interface WhatsAppService {
 
     void enviarMensaje(String destinatario, String texto);
 
+    // Igual que enviarMensaje, pero citando otro mensaje (la acción de WhatsApp Web de
+    // "responder" con la vista previa del mensaje original arriba). replyToWaMessageId es el
+    // wa_message_id del mensaje citado; si es null o vacío, se comporta igual que el método de
+    // 2 parámetros (mensaje normal sin cita).
+    void enviarMensaje(String destinatario, String texto, String replyToWaMessageId);
+
     void enviarBotones(String destinatario, String texto, List<Map<String, String>> botones);
 
     void enviarNotificacionEnvio(String destinatario, String nombre, String guia);

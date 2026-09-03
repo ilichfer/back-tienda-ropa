@@ -165,6 +165,14 @@ public class WhatsAppServiceImpl implements WhatsAppService {
 
             var cliente = clienteRepo.findByWhatsapp(from).orElse(null);
             var primerMensaje = !mensajeRepo.existsByWhatsappFrom(from);
+
+            // Si el cliente respondió citando un mensaje/foto desde su teléfono (la acción de
+            // WhatsApp Web/app de "responder"), el webhook trae un objeto "context" con el id
+            // del mensaje original citado. Se guarda para poder mostrar esa cita en el panel.
+            var contextWaMessageId = msg.has("context") && msg.get("context").has("id")
+                    ? msg.get("context").get("id").asText()
+                    : null;
+
             try {
                 mensajeRepo.save(WaMensaje.builder()
                         .whatsappFrom(from)
@@ -173,6 +181,7 @@ public class WhatsAppServiceImpl implements WhatsAppService {
                         .tipo(tipo)
                         .direccion("ENTRADA")
                         .waMessageId(waId)
+                        .contextWaMessageId(contextWaMessageId)
                         .mediaId(mediaId.isBlank() ? null : mediaId)
                         .mimeType(mimeType.isBlank() ? null : mimeType)
                         .build());
@@ -1314,12 +1323,23 @@ public class WhatsAppServiceImpl implements WhatsAppService {
 
     @Override
     public void enviarMensaje(String destinatario, String texto) {
-        var body = Map.of(
-            "messaging_product", "whatsapp",
-            "to", destinatario,
-            "type", "text",
-            "text", Map.of("body", texto)
-        );
+        enviarMensaje(destinatario, texto, null);
+    }
+
+    @Override
+    public void enviarMensaje(String destinatario, String texto, String replyToWaMessageId) {
+        var body = new java.util.LinkedHashMap<String, Object>();
+        body.put("messaging_product", "whatsapp");
+        body.put("to", destinatario);
+        body.put("type", "text");
+        body.put("text", Map.of("body", texto));
+        var citando = replyToWaMessageId != null && !replyToWaMessageId.isBlank();
+        if (citando) {
+            // "context.message_id" es lo que hace que WhatsApp muestre este mensaje como una
+            // respuesta citando al original (con su vista previa arriba), igual que el botón
+            // de "Responder" en WhatsApp Web.
+            body.put("context", Map.of("message_id", replyToWaMessageId));
+        }
 
         try {
             var r = whatsappWebClient.post()
@@ -1336,6 +1356,7 @@ public class WhatsAppServiceImpl implements WhatsAppService {
                     .tipo("text")
                     .direccion("SALIDA")
                     .waMessageId(r.get("messages").get(0).get("id").asText())
+                    .contextWaMessageId(citando ? replyToWaMessageId : null)
                     .build());
         } catch (Exception e) {
             log.error("Error enviando WA a {}", destinatario, e);
