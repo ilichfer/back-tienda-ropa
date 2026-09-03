@@ -28,4 +28,9 @@ public interface WaMensajeRepository extends JpaRepository<WaMensaje, UUID> {
     @Transactional
     @Query("UPDATE WaMensaje m SET m.leido = true WHERE m.whatsappFrom = :whatsappFrom AND m.direccion = 'ENTRADA'")
     int marcarLeidas(String whatsappFrom);
+
+    @Modifying
+    @Transactional
+    @Query("DELETE FROM WaMensaje m WHERE m.whatsappFrom = :whatsappFrom")
+    int deleteByWhatsappFrom(String whatsappFrom);
 }

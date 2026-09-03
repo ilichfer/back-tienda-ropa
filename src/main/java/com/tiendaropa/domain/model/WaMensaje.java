@@ -18,13 +18,13 @@ public class WaMensaje {
     @JoinColumn(name = "cliente_id")
     private Cliente cliente;
 
-    @Column(name = "whatsapp_from", nullable = false, length = 20)
+    @Column(name = "whatsapp_from", nullable = false, length = 50)
     private String whatsappFrom;
 
     @Column(nullable = false, columnDefinition = "text")
     private String contenido;
 
-    @Column(length = 20)
+    @Column(length = 50)
     @Builder.Default
     private String tipo = "text";
 

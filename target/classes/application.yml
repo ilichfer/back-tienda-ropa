@@ -6,10 +6,27 @@ spring:
     hikari:
       maximum-pool-size: 10
       minimum-idle: 2
+  # El esquema ya NO lo maneja ni Hibernate (ddl-auto) ni un schema.sql suelto: los dos a la
+  # vez fue justo lo que causó bugs reales (ej. la fecha "Invalid Date" de Inconvenientes,
+  # porque Hibernate creó la tabla en dev sin el DEFAULT que solo tenía el schema.sql, y en
+  # producción ese schema.sql corría distinto). Ahora Flyway es la única fuente de verdad del
+  # esquema, en los 3 ambientes por igual, con migraciones versionadas en
+  # src/main/resources/db/migration/ (V1__baseline.sql, V2__..., etc — nunca se edita una
+  # migración ya aplicada, siempre se agrega una nueva).
+  #
+  # baseline-version: 0 hace que V1__baseline.sql se ejecute DE VERDAD incluso en las bases
+  # de datos que ya existen hoy (dev/prod) — no solo en una nueva y vacía — porque V1 es
+  # idempotente (igual que lo era el schema.sql viejo) y de paso empareja cualquier diferencia
+  # que se haya acumulado entre dev y prod por el ddl-auto:update de antes.
   flyway:
-    enabled: false
+    enabled: true
+    baseline-on-migrate: true
+    baseline-version: 0
+    baseline-description: "esquema existente antes de adoptar Flyway"
   jpa:
     hibernate:
+      # Con Flyway a cargo del esquema, Hibernate no debe tocarlo ni intentar "ayudar":
+      # ddl-auto queda en none en los 3 ambientes (ya no se sobreescribe por perfil).
       ddl-auto: none
     show-sql: false
     properties:
@@ -18,12 +35,6 @@ spring:
         jdbc:
           lob:
             non_contextual_creation: true
-    defer-datasource-initialization: true
-  sql:
-    init:
-      mode: always
-      schema-locations: classpath:schema.sql
-      separator: "//"
   jackson:
     serialization:
       write-dates-as-timestamps: false
@@ -40,11 +51,18 @@ agente-ia:
     - Idioma: Siempre en español
     - Respuestas: Máximo 2-3 oraciones
 
+    SALUDOS Y CONTINUIDAD:
+    - Al primer mensaje del cliente ya se le envía automáticamente un saludo de bienvenida, así que NUNCA vuelvas a presentarte completa ("Soy Jireh, la asesora virtual de...") en el resto de la conversación.
+    - En el CONTEXTO recibirás los últimos mensajes de la conversación. Si ya hay mensajes previos, el cliente NO es nuevo: si vuelve a saludar ("hola", "buenas", etc.) respóndele breve y natural (ej: "¡Hola! ¿En qué más te puedo ayudar? 😊"), sin repetir tu presentación ni el saludo inicial.
+    - Solo preséntate como "Jireh" si el CONTEXTO está vacío o no hay ningún mensaje previo del cliente.
+
     REGLAS DE NEGOCIO:
     - Solo vendemos por TikTok, no tenemos tienda física
     - Envíos desde Bogotá a toda Colombia
     - Días de envío: Martes y Viernes
     - No inventes precios, tallas ni disponibilidad que no conozcas
+    - Los pagos se reciben por Nequi o Daviplata al número 3229063035 (IMPORTANTE: escribe siempre los 10 dígitos completos y exactos "3229063035", nunca lo abrevies ni lo cortes). Si el cliente pregunta cómo pagar o a qué número consignar, da ese número completo y aclara que puede ser por Nequi o Daviplata. Después de que pague, pídele que envíe la foto del comprobante.
+    - IMPORTANTE: NUNCA respondas con un precio o valor de una prenda, ni siquiera aproximado. Si el cliente pregunta el precio, cuánto cuesta o cuánto vale algo, dile que un asesor le confirma el valor exacto en breve — esa información solo la tiene el asesor.
 
     DATOS PARA ENVÍO (solicitar cuando el cliente quiera enviar):
     - Nombre completo
@@ -81,10 +99,19 @@ agente-ia:
     - Quiera hacer un pedido (apartar prenda)
     - Tenga quejas o reclamos
 
+    DETECCIÓN DE PROBLEMAS / RECLAMOS:
+    Cuando el cliente reporte un problema con su pedido (ropa rota, dañada, imperfecta, con manchas, incompleta, faltante, mal estado, no le llegó todo), debes responder EXACTAMENTE con este formato:
+    [REPORTE_INCONVENIENTE]
+    Lamento mucho escuchar eso. Para poder ayudarte, ¿puedes contarme con más detalle qué problema tienes y enviarme fotos del estado de la prenda?
+
+    RECUERDA: Incluye [REPORTE_INCONVENIENTE] al inicio cuando detectes un reclamo o problema con un pedido.
+
     RESPUESTAS CORTAS Y DIRECTAS. No des información inventada.
   groq:
     api-key: ${GROQ_API_KEY:}
-    model: ${GROQ_MODEL:llama-3.3-70b-versatile}
+    # llama-3.3-70b-versatile fue retirado por Groq el 16 de agosto de 2026 para cuentas
+    # free/developer; qwen/qwen3.6-27b es el reemplazo recomendado (y ya se usa para imágenes).
+    model: ${GROQ_MODEL:qwen/qwen3.6-27b}
     base-url: ${GROQ_BASE_URL:https://api.groq.com}
   gemini:
     api-key: ${GEMINI_API_KEY}

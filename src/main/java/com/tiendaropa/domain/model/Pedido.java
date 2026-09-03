@@ -39,10 +39,13 @@ public class Pedido {
     @Column(name = "costo_envio", precision = 12, scale = 2)
     private BigDecimal costoEnvio = new BigDecimal("12000");
 
-    @Column(name = "numero_guia")
+    @Column(name = "numero_guia", length = 80)
     private String numeroGuia;
 
+    @Column(length = 50)
     private String transportadora;
+
+    @Column(columnDefinition = "text")
     private String notas;
 
     @Column(name = "nombre_dueño", length = 120)

@@ -18,4 +18,6 @@ public interface WhatsAppService {
     void enviarConfirmacionApartado(String destinatario, String nombre, String prenda, String precio);
 
     void actualizarNombreCliente(String whatsappFrom, String nombre);
+
+    void borrarConversacion(String whatsappFrom);
 }

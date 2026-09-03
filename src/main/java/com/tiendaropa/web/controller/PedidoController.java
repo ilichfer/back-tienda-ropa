@@ -45,7 +45,10 @@ public class PedidoController {
 
     @PostMapping("/pedidos/bodega")
     public ResponseEntity<PedidoResponse> crearBodega(@RequestBody Map<String, String> body) {
-        var pedido = pedidoService.crearBodega(body.get("nombre"), body.get("ubicacion"));
+        // "whatsapp" ata el pedido a un chat/cliente existente (ver Bodega.tsx, el
+        // desplegable de "Nombre" ahora envía el número del chat seleccionado en vez
+        // de texto libre).
+        var pedido = pedidoService.crearBodega(body.get("whatsapp"), body.get("ubicacion"));
         return ResponseEntity.status(HttpStatus.CREATED).body(PedidoResponse.from(pedido));
     }
 

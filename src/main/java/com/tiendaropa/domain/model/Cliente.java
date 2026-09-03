@@ -23,7 +23,17 @@ public class Cliente {
     @Column(length = 80)
     private String ciudad;
 
+    @Column(columnDefinition = "text")
     private String direccion;
+
+    @Builder.Default
+    private Boolean requiereAsesor = false;
+
+    // Interruptor manual del operador: en true, el bot (IA + flujos automáticos) no
+    // responde nada en esta conversación hasta que un humano lo vuelva a activar.
+    // Independiente de requiereAsesor, que es una señal automática.
+    @Builder.Default
+    private Boolean botSilenciado = false;
 
     @Column(insertable = false, updatable = false)
     private Instant createdAt;

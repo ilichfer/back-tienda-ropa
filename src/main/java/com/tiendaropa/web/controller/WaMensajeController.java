@@ -48,6 +48,17 @@ public class WaMensajeController {
         var texto = body.get("texto");
         if (texto == null || texto.isBlank()) throw new IllegalArgumentException("'texto' es requerido");
         whatsAppService.enviarMensaje(to, texto);
+
+        // La marca naranja de "requiere asesor" se quita cuando el asesor REALMENTE gestiona
+        // el chat (le responde algo), no solo por abrirlo a mirarlo — antes se quitaba con
+        // solo hacer clic en el chat, así que un caso podía quedar sin atender de verdad y
+        // ya no se notaba.
+        var cliente = clienteRepo.findByWhatsapp(to).orElse(null);
+        if (cliente != null && Boolean.TRUE.equals(cliente.getRequiereAsesor())) {
+            cliente.setRequiereAsesor(false);
+            clienteRepo.save(cliente);
+            log.info("[ASESOR] {} fue gestionado manualmente, se quita la marca de requiere asesor", to);
+        }
     }
 
     @PostMapping("/leer")
@@ -56,6 +67,43 @@ public class WaMensajeController {
         if (whatsappFrom == null || whatsappFrom.isBlank())
             throw new IllegalArgumentException("'whatsappFrom' es requerido");
         waMensajeRepo.marcarLeidas(whatsappFrom);
+    }
+
+    @PatchMapping("/asesor-visitado")
+    public void marcarAsesorVisto(@RequestBody Map<String, String> body) {
+        var whatsappFrom = body.get("whatsappFrom");
+        if (whatsappFrom == null || whatsappFrom.isBlank())
+            throw new IllegalArgumentException("'whatsappFrom' es requerido");
+        var cliente = clienteRepo.findByWhatsapp(whatsappFrom).orElse(null);
+        if (cliente != null) {
+            cliente.setRequiereAsesor(false);
+            clienteRepo.save(cliente);
+        }
+    }
+
+    /**
+     * Interruptor manual para pausar/reactivar el bot en una conversación puntual.
+     * Body: { "whatsappFrom": "...", "silenciado": true|false }. Si se omite "silenciado",
+     * se asume true (silenciar) — pensado para un botón simple desde el panel.
+     */
+    @PatchMapping("/silenciar-bot")
+    public void silenciarBot(@RequestBody Map<String, Object> body) {
+        var whatsappFrom = body.get("whatsappFrom") != null ? body.get("whatsappFrom").toString() : null;
+        if (whatsappFrom == null || whatsappFrom.isBlank())
+            throw new IllegalArgumentException("'whatsappFrom' es requerido");
+        var silenciadoObj = body.get("silenciado");
+        var silenciado = silenciadoObj == null || Boolean.TRUE.equals(silenciadoObj);
+        var cliente = clienteRepo.findByWhatsapp(whatsappFrom).orElse(null);
+        if (cliente != null) {
+            cliente.setBotSilenciado(silenciado);
+            clienteRepo.save(cliente);
+            log.info("[BOT] {} el bot para {}", silenciado ? "Silenciado" : "Reactivado", whatsappFrom);
+        }
+    }
+
+    @DeleteMapping("/{whatsappFrom}")
+    public void borrar(@PathVariable String whatsappFrom) {
+        whatsAppService.borrarConversacion(whatsappFrom);
     }
 
     @PutMapping("/cliente")
