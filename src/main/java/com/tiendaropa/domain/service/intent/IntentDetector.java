@@ -140,7 +140,13 @@ public class IntentDetector {
                 || t.contains("me falta") || t.contains("llegó mal") || t.contains("llego mal")
                 || t.contains("problema con") || t.contains("reclamo") || t.contains("queja")
                 || t.contains("rotas") || t.contains("dañadas") || t.contains("manchada")
-                || t.contains("imperfeccion");
+                || t.contains("imperfeccion")
+                // Variantes de "faltar" que "me falta" no cubre (ej. "me hizo falta una
+                // prenda", "faltó una prenda") — antes esto caía hasta esIntencionPedido, que
+                // matchea con la palabra suelta "pedido" y terminaba abriendo por error el
+                // flujo de apartar una prenda nueva en vez del de inconveniente.
+                || t.contains("hizo falta") || t.contains("hicieron falta")
+                || t.contains("faltó") || t.contains("falto");
     }
 
     // Detecta cuando el cliente pregunta por el horario/fecha del próximo live de TikTok. No
