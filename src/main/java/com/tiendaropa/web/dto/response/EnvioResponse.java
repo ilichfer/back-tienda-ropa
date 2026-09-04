@@ -15,14 +15,15 @@ public record EnvioResponse(
     String barrio,
     String notas,
     String estado,
-    Instant createdAt
+    Instant createdAt,
+    Instant updatedAt
 ) {
     public static EnvioResponse from(SolicitudEnvio e) {
         return new EnvioResponse(
             e.getId(), e.getWhatsapp(),
             e.getNombreCompleto(), e.getTelefono(), e.getCedula(),
             e.getDireccion(), e.getCiudad(), e.getBarrio(),
-            e.getNotas(), e.getEstado(), e.getCreatedAt()
+            e.getNotas(), e.getEstado(), e.getCreatedAt(), e.getUpdatedAt()
         );
     }
 }

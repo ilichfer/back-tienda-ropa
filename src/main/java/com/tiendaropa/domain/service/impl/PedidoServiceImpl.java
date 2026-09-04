@@ -83,10 +83,13 @@ public class PedidoServiceImpl implements PedidoService {
             case PAGADO   -> prenda.setEstado(EstadoPrenda.PAGADA);
             case ENVIADO  -> {
                 prenda.setEstado(EstadoPrenda.ENVIADA);
-                whatsAppService.enviarNotificacionEnvio(
+                pedido.setFechaEnvio(java.time.Instant.now());
+                // Al marcar como enviado desde el panel todavía no se conoce el número de
+                // guía (se agrega después), así que siempre se manda el aviso fijo de
+                // "ya se envió, la guía llega pronto" — nunca se inventa ni se deja vacía.
+                whatsAppService.enviarAvisoEnviadoSinGuia(
                     pedido.getCliente().getWhatsapp(),
-                    pedido.getCliente().getNombre(),
-                    pedido.getNumeroGuia()
+                    pedido.getCliente().getNombre()
                 );
             }
             case CANCELADO -> prenda.setEstado(EstadoPrenda.DISPONIBLE);
@@ -101,9 +104,9 @@ public class PedidoServiceImpl implements PedidoService {
 
     @Override
     @Transactional
-    public Pedido crearBodega(String nombre, String ubicacion) {
-        if (nombre == null || nombre.isBlank()) {
-            throw new IllegalArgumentException("El nombre es requerido");
+    public Pedido crearBodega(String whatsapp, String ubicacion) {
+        if (whatsapp == null || whatsapp.isBlank()) {
+            throw new IllegalArgumentException("Debes seleccionar un chat existente");
         }
         if (ubicacion == null || ubicacion.isBlank()) {
             throw new IllegalArgumentException("La ubicación es requerida");
@@ -112,8 +115,17 @@ public class PedidoServiceImpl implements PedidoService {
             throw new IllegalArgumentException("Ubicación inválida: solo REPISA o ESTANTE");
         }
 
+        // El pedido queda atado al chat de WhatsApp seleccionado (no a un nombre libre).
+        // Si el chat todavía no tiene un Cliente creado (puede pasar si nunca se le puso
+        // nombre desde el panel de WhatsApp), se crea uno vacío con ese número para poder
+        // enlazarlo — el nombre se completa después desde el panel de WhatsApp.
+        var cliente = clienteRepo.findByWhatsapp(whatsapp.trim())
+                .orElseGet(() -> clienteRepo.save(Cliente.builder()
+                        .whatsapp(whatsapp.trim())
+                        .build()));
+
         var pedido = pedidoRepo.save(Pedido.builder()
-                .nombreDueño(nombre.trim())
+                .cliente(cliente)
                 .ubicacion(ubicacion.trim().toUpperCase())
                 .estado(EstadoPedido.NUEVO)
                 .build());

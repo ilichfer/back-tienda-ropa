@@ -39,10 +39,13 @@ public class Pedido {
     @Column(name = "costo_envio", precision = 12, scale = 2)
     private BigDecimal costoEnvio = new BigDecimal("12000");
 
-    @Column(name = "numero_guia")
+    @Column(name = "numero_guia", length = 80)
     private String numeroGuia;
 
+    @Column(length = 50)
     private String transportadora;
+
+    @Column(columnDefinition = "text")
     private String notas;
 
     @Column(name = "nombre_dueño", length = 120)
@@ -50,6 +53,12 @@ public class Pedido {
 
     @Column(length = 20)
     private String ubicacion;
+
+    // Fecha en la que se marcó el pedido como "enviado" desde el panel (sección
+    // Pedidos → Envíos pendientes). Se guarda al presionar "Marcar como enviado",
+    // no cuando el estado cambia por cualquier otra vía.
+    @Column(name = "fecha_envio")
+    private Instant fechaEnvio;
 
     @Column(name = "created_at", insertable = false, updatable = false)
     private Instant createdAt;

@@ -21,6 +21,7 @@ public class Lote {
     @Column(name = "fecha_live", nullable = false)
     private LocalDate fechaLive;
 
+    @Column(columnDefinition = "text")
     private String descripcion;
 
     @Column(nullable = false)

@@ -47,7 +47,21 @@ public class WaMensajeController {
         if (to == null || to.isBlank()) throw new IllegalArgumentException("'to' es requerido");
         var texto = body.get("texto");
         if (texto == null || texto.isBlank()) throw new IllegalArgumentException("'texto' es requerido");
-        whatsAppService.enviarMensaje(to, texto);
+        // Opcional: wa_message_id del mensaje que se está citando ("Responder" desde el panel,
+        // igual que en WhatsApp Web). Si no viene, es un mensaje normal sin cita.
+        var replyToWaMessageId = body.get("replyToWaMessageId");
+        whatsAppService.enviarMensaje(to, texto, replyToWaMessageId);
+
+        // La marca naranja de "requiere asesor" se quita cuando el asesor REALMENTE gestiona
+        // el chat (le responde algo), no solo por abrirlo a mirarlo — antes se quitaba con
+        // solo hacer clic en el chat, así que un caso podía quedar sin atender de verdad y
+        // ya no se notaba.
+        var cliente = clienteRepo.findByWhatsapp(to).orElse(null);
+        if (cliente != null && Boolean.TRUE.equals(cliente.getRequiereAsesor())) {
+            cliente.setRequiereAsesor(false);
+            clienteRepo.save(cliente);
+            log.info("[ASESOR] {} fue gestionado manualmente, se quita la marca de requiere asesor", to);
+        }
     }
 
     @PostMapping("/leer")
@@ -56,6 +70,82 @@ public class WaMensajeController {
         if (whatsappFrom == null || whatsappFrom.isBlank())
             throw new IllegalArgumentException("'whatsappFrom' es requerido");
         waMensajeRepo.marcarLeidas(whatsappFrom);
+    }
+
+    @PatchMapping("/asesor-visitado")
+    public void marcarAsesorVisto(@RequestBody Map<String, String> body) {
+        var whatsappFrom = body.get("whatsappFrom");
+        if (whatsappFrom == null || whatsappFrom.isBlank())
+            throw new IllegalArgumentException("'whatsappFrom' es requerido");
+        var cliente = clienteRepo.findByWhatsapp(whatsappFrom).orElse(null);
+        if (cliente != null) {
+            cliente.setRequiereAsesor(false);
+            clienteRepo.save(cliente);
+        }
+    }
+
+    /**
+     * Interruptor manual para pausar/reactivar el bot en una conversación puntual.
+     * Body: { "whatsappFrom": "...", "silenciado": true|false }. Si se omite "silenciado",
+     * se asume true (silenciar) — pensado para un botón simple desde el panel.
+     */
+    @PatchMapping("/silenciar-bot")
+    public void silenciarBot(@RequestBody Map<String, Object> body) {
+        var whatsappFrom = body.get("whatsappFrom") != null ? body.get("whatsappFrom").toString() : null;
+        if (whatsappFrom == null || whatsappFrom.isBlank())
+            throw new IllegalArgumentException("'whatsappFrom' es requerido");
+        var silenciadoObj = body.get("silenciado");
+        var silenciado = silenciadoObj == null || Boolean.TRUE.equals(silenciadoObj);
+        var cliente = clienteRepo.findByWhatsapp(whatsappFrom).orElse(null);
+        if (cliente != null) {
+            cliente.setBotSilenciado(silenciado);
+            clienteRepo.save(cliente);
+            log.info("[BOT] {} el bot para {}", silenciado ? "Silenciado" : "Reactivado", whatsappFrom);
+        }
+    }
+
+    /**
+     * Marca/desmarca un chat como el buzón de donde llegan las fotos de guías de envío (no es
+     * un cliente real). Al marcarlo, también se activa "silenciar bot" — no tiene sentido que
+     * el bot salude o interprete imágenes ahí. Al desmarcarlo, "silenciar bot" no se toca (el
+     * asesor lo reactiva aparte si quiere).
+     * Body: { "whatsappFrom": "...", "esBuzonGuias": true|false }.
+     */
+    @PatchMapping("/marcar-buzon-guias")
+    public void marcarBuzonGuias(@RequestBody Map<String, Object> body) {
+        var whatsappFrom = body.get("whatsappFrom") != null ? body.get("whatsappFrom").toString() : null;
+        if (whatsappFrom == null || whatsappFrom.isBlank())
+            throw new IllegalArgumentException("'whatsappFrom' es requerido");
+        var esBuzonGuias = Boolean.TRUE.equals(body.get("esBuzonGuias"));
+        var cliente = clienteRepo.findByWhatsapp(whatsappFrom).orElse(null);
+        if (cliente != null) {
+            cliente.setEsBuzonGuias(esBuzonGuias);
+            if (esBuzonGuias) cliente.setBotSilenciado(true);
+            clienteRepo.save(cliente);
+            log.info("[BUZON-GUIAS] {} como buzón de guías: {}", whatsappFrom, esBuzonGuias);
+        }
+    }
+
+    /**
+     * Reenvía una imagen ya recibida (mensajeId propio, no el wa_message_id de Meta) a otro
+     * número — pensado para reenviar la foto de una guía desde el buzón dedicado al chat del
+     * cliente que corresponde, con confirmación humana desde el panel.
+     * Body: { "mensajeId": "...", "destinatario": "..." }.
+     */
+    @PostMapping("/reenviar-imagen")
+    public void reenviarImagen(@RequestBody Map<String, String> body) {
+        var mensajeId = body.get("mensajeId");
+        var destinatario = body.get("destinatario");
+        if (mensajeId == null || mensajeId.isBlank())
+            throw new IllegalArgumentException("'mensajeId' es requerido");
+        if (destinatario == null || destinatario.isBlank())
+            throw new IllegalArgumentException("'destinatario' es requerido");
+        whatsAppService.reenviarImagen(java.util.UUID.fromString(mensajeId), destinatario);
+    }
+
+    @DeleteMapping("/{whatsappFrom}")
+    public void borrar(@PathVariable String whatsappFrom) {
+        whatsAppService.borrarConversacion(whatsappFrom);
     }
 
     @PutMapping("/cliente")
