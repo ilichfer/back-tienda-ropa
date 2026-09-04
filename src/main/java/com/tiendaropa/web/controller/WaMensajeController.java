@@ -104,6 +104,45 @@ public class WaMensajeController {
         }
     }
 
+    /**
+     * Marca/desmarca un chat como el buzón de donde llegan las fotos de guías de envío (no es
+     * un cliente real). Al marcarlo, también se activa "silenciar bot" — no tiene sentido que
+     * el bot salude o interprete imágenes ahí. Al desmarcarlo, "silenciar bot" no se toca (el
+     * asesor lo reactiva aparte si quiere).
+     * Body: { "whatsappFrom": "...", "esBuzonGuias": true|false }.
+     */
+    @PatchMapping("/marcar-buzon-guias")
+    public void marcarBuzonGuias(@RequestBody Map<String, Object> body) {
+        var whatsappFrom = body.get("whatsappFrom") != null ? body.get("whatsappFrom").toString() : null;
+        if (whatsappFrom == null || whatsappFrom.isBlank())
+            throw new IllegalArgumentException("'whatsappFrom' es requerido");
+        var esBuzonGuias = Boolean.TRUE.equals(body.get("esBuzonGuias"));
+        var cliente = clienteRepo.findByWhatsapp(whatsappFrom).orElse(null);
+        if (cliente != null) {
+            cliente.setEsBuzonGuias(esBuzonGuias);
+            if (esBuzonGuias) cliente.setBotSilenciado(true);
+            clienteRepo.save(cliente);
+            log.info("[BUZON-GUIAS] {} como buzón de guías: {}", whatsappFrom, esBuzonGuias);
+        }
+    }
+
+    /**
+     * Reenvía una imagen ya recibida (mensajeId propio, no el wa_message_id de Meta) a otro
+     * número — pensado para reenviar la foto de una guía desde el buzón dedicado al chat del
+     * cliente que corresponde, con confirmación humana desde el panel.
+     * Body: { "mensajeId": "...", "destinatario": "..." }.
+     */
+    @PostMapping("/reenviar-imagen")
+    public void reenviarImagen(@RequestBody Map<String, String> body) {
+        var mensajeId = body.get("mensajeId");
+        var destinatario = body.get("destinatario");
+        if (mensajeId == null || mensajeId.isBlank())
+            throw new IllegalArgumentException("'mensajeId' es requerido");
+        if (destinatario == null || destinatario.isBlank())
+            throw new IllegalArgumentException("'destinatario' es requerido");
+        whatsAppService.reenviarImagen(java.util.UUID.fromString(mensajeId), destinatario);
+    }
+
     @DeleteMapping("/{whatsappFrom}")
     public void borrar(@PathVariable String whatsappFrom) {
         whatsAppService.borrarConversacion(whatsappFrom);

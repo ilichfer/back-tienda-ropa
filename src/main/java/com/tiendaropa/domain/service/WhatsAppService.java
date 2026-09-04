@@ -39,6 +39,15 @@ public interface WhatsAppService {
     // no aprobada o destinatario fuera de la ventana de 24h sin plantilla válida).
     String enviarPlantillaMeta(String destinatario, String nombrePlantilla, String idioma, List<String> valoresVariables);
 
+    // Manda una imagen a un número (subiéndola primero a Meta) — no existía ninguna forma de
+    // mandar media hacia afuera, solo texto/botones/plantilla. Devuelve el wa_message_id.
+    String enviarImagen(String destinatario, byte[] bytes, String mimeType, String caption);
+
+    // Reenvía la imagen de un mensaje ya recibido (mensajeId, propio de nuestra BD) a otro
+    // número — resuelve los bytes (local si ya la tenemos guardada, si no la descarga de Meta)
+    // y llama a enviarImagen.
+    void reenviarImagen(java.util.UUID mensajeId, String destinatario);
+
     // Mensaje fijo que se manda al presionar "Marcar como enviado" desde el panel, cuando
     // todavía no se conoce el número de guía (avisa que el pedido salió y que la guía se
     // envía después). No depende de IA: es siempre el mismo texto.

@@ -21,9 +21,13 @@ import com.tiendaropa.domain.service.intent.IntentDetector;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.ByteArrayResource;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.http.MediaType;
+import org.springframework.http.client.MultipartBodyBuilder;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.web.reactive.function.BodyInserters;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import java.nio.file.Files;
@@ -1687,6 +1691,106 @@ public class WhatsAppServiceImpl implements WhatsAppService {
             log.error("[BROADCAST] Error enviando plantilla '{}' a {}: {}", nombrePlantilla, destinatario, e.getMessage());
             throw new RuntimeException("Error enviando plantilla WhatsApp: " + e.getMessage(), e);
         }
+    }
+
+    @Override
+    public String enviarImagen(String destinatario, byte[] bytes, String mimeType, String caption) {
+        if (bytes == null || bytes.length == 0) {
+            throw new IllegalArgumentException("No hay contenido de imagen para enviar");
+        }
+        try {
+            // Paso 1: subir el archivo a Meta — el id que devuelve acá es de SALIDA, no sirve
+            // reusar el mediaId de un mensaje recibido (son namespaces distintos).
+            var mimeFinal = mimeType == null || mimeType.isBlank() ? "image/jpeg" : mimeType;
+            var multipart = new MultipartBodyBuilder();
+            multipart.part("messaging_product", "whatsapp");
+            multipart.part("type", mimeFinal);
+            multipart.part("file", new ByteArrayResource(bytes) {
+                @Override
+                public String getFilename() {
+                    return "imagen." + extensionSegunMime(mimeFinal);
+                }
+            }).contentType(MediaType.parseMediaType(mimeFinal));
+
+            var subida = whatsappWebClient.post()
+                .uri("/{phoneId}/media", phoneNumberId)
+                .header("Authorization", "Bearer " + accessToken)
+                .contentType(MediaType.MULTIPART_FORM_DATA)
+                .body(BodyInserters.fromMultipartData(multipart.build()))
+                .retrieve()
+                .bodyToMono(JsonNode.class)
+                .block();
+            var mediaIdSalida = subida.get("id").asText();
+
+            // Paso 2: mandar el mensaje de imagen referenciando ese id recién subido.
+            var imageBody = new java.util.LinkedHashMap<String, Object>();
+            imageBody.put("id", mediaIdSalida);
+            if (caption != null && !caption.isBlank()) imageBody.put("caption", caption);
+
+            var body = Map.of(
+                "messaging_product", "whatsapp",
+                "to", destinatario,
+                "type", "image",
+                "image", imageBody
+            );
+
+            var r = whatsappWebClient.post()
+                .uri("/{phoneId}/messages", phoneNumberId)
+                .header("Authorization", "Bearer " + accessToken)
+                .bodyValue(body)
+                .retrieve()
+                .bodyToMono(JsonNode.class)
+                .block();
+            var waMessageId = r.get("messages").get(0).get("id").asText();
+
+            // Se guarda una copia local (mismo patrón que guardarMediaLocal) para que la
+            // imagen reenviada quede visible de inmediato en el panel sin depender de que
+            // Meta la siga sirviendo por su cuenta.
+            var mediaPath = guardarMediaLocal(bytes, mimeFinal);
+            mensajeRepo.save(WaMensaje.builder()
+                    .whatsappFrom(destinatario)
+                    .contenido(caption != null && !caption.isBlank() ? caption : "[image]")
+                    .tipo("image")
+                    .direccion("SALIDA")
+                    .waMessageId(waMessageId)
+                    .mediaPath(mediaPath)
+                    .mimeType(mimeFinal)
+                    .build());
+            log.info("[MEDIA] Imagen enviada a {} (wa_message_id={})", destinatario, waMessageId);
+            return waMessageId;
+        } catch (Exception e) {
+            log.error("[MEDIA] Error enviando imagen a {}: {}", destinatario, e.getMessage());
+            throw new RuntimeException("Error enviando imagen WhatsApp: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public void reenviarImagen(UUID mensajeId, String destinatario) {
+        var origen = mensajeRepo.findById(mensajeId)
+                .orElseThrow(() -> new IllegalArgumentException("Mensaje no encontrado: " + mensajeId));
+        if (!"image".equals(origen.getTipo())) {
+            throw new IllegalArgumentException("Solo se pueden reenviar mensajes de tipo imagen");
+        }
+
+        byte[] bytes;
+        if (origen.getMediaPath() != null && !origen.getMediaPath().isBlank()) {
+            try {
+                bytes = Files.readAllBytes(Paths.get(mediaDir, origen.getMediaPath()));
+            } catch (Exception e) {
+                log.warn("[MEDIA] No se pudo leer la copia local {} para reenviar, se intenta descargar de Meta: {}",
+                        origen.getMediaPath(), e.getMessage());
+                bytes = descargarMediaBytes(origen.getMediaId());
+            }
+        } else {
+            bytes = descargarMediaBytes(origen.getMediaId());
+        }
+
+        if (bytes == null || bytes.length == 0) {
+            throw new IllegalStateException("No se pudo obtener la imagen para reenviar (puede haber expirado en Meta)");
+        }
+
+        var caption = origen.getContenido() != null && !origen.getContenido().startsWith("[") ? origen.getContenido() : null;
+        enviarImagen(destinatario, bytes, origen.getMimeType(), caption);
     }
 
     @Override

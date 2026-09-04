@@ -35,6 +35,11 @@ public class Cliente {
     @Builder.Default
     private Boolean botSilenciado = false;
 
+    // Marca un chat como la fuente de donde llegan las fotos de guías de envío (no es un
+    // cliente real) — ver WaMensajeController.marcarBuzonGuias.
+    @Builder.Default
+    private Boolean esBuzonGuias = false;
+
     @Column(insertable = false, updatable = false)
     private Instant createdAt;
 
