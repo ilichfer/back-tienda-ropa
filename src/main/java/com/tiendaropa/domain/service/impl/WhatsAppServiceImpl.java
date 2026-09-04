@@ -617,6 +617,16 @@ public class WhatsAppServiceImpl implements WhatsAppService {
         }
 
         if (FLUJO_PEDIDO.equals(conv.flujo)) {
+            // A diferencia de los demás pasos de este flujo, acá SÍ hay que revisar la
+            // intención de inconveniente (igual que ya hace FLUJO_ENVIO arriba): antes, un
+            // cliente a mitad de apartar una prenda que reportaba un problema ("tengo un
+            // inconveniente con mi ropa") no calzaba con ningún if/else de abajo y se quedaba
+            // sin ninguna respuesta — el bot simplemente no decía nada.
+            if (intentDetector.esIntencionInconveniente(contenido)) {
+                log.info("[TEXTO] Flujo PEDIDO activo pero detectada intención de inconveniente, eliminando conversación vieja");
+                stateStore.remove(from);
+                return procesarTextoEntrante(from, contenido, false);
+            }
             if (conv.paso == PEDIDO_NOMBRE) {
                 conv.concepto = contenido.trim();
                 preguntarValor(from, conv);
