@@ -19,7 +19,17 @@ public interface WhatsAppService {
 
     void enviarBotones(String destinatario, String texto, List<Map<String, String>> botones);
 
+    // Manda el formulario nativo de WhatsApp (Flow) para pedir los datos de envío en una sola
+    // pantalla, en vez del ir y venir de preguntas de texto. Requiere que el Flow ya esté creado
+    // y publicado en WhatsApp Manager, y su ID configurado en whatsapp.flow-envio-id.
+    void enviarFlujoEnvio(String destinatario);
+
     void enviarNotificacionEnvio(String destinatario, String nombre, String guia);
+
+    // Mensaje fijo que se manda al presionar "Marcar como enviado" desde el panel, cuando
+    // todavía no se conoce el número de guía (avisa que el pedido salió y que la guía se
+    // envía después). No depende de IA: es siempre el mismo texto.
+    void enviarAvisoEnviadoSinGuia(String destinatario, String nombre);
 
     void enviarConfirmacionApartado(String destinatario, String nombre, String prenda, String precio);
 

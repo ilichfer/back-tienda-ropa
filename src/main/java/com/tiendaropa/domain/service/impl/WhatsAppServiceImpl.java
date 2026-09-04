@@ -48,6 +48,12 @@ public class WhatsAppServiceImpl implements WhatsAppService {
     @Value("${whatsapp.media-dir:./media}")
     private String mediaDir;
 
+    // ID del Flow de "Datos de envío" en WhatsApp Manager. Mientras esté vacío (no configurado),
+    // iniciarFlujoEnvio() sigue usando las preguntas de texto de siempre — así este cambio no
+    // afecta nada hasta que el Flow esté creado y publicado y se pegue su ID acá.
+    @Value("${whatsapp.flow-envio-id:}")
+    private String flowEnvioId;
+
     private final WebClient whatsappWebClient;
 
     private final WaMensajeRepository mensajeRepo;
@@ -128,6 +134,13 @@ public class WhatsAppServiceImpl implements WhatsAppService {
                         contenido = title;
                         tipo = "button_" + id;
                         log.info("WA botón [{}]: {} ({})", from, title, id);
+                    } else if ("nfm_reply".equals(sub)) {
+                        // Respuesta de un formulario nativo (Flow) de WhatsApp, ej. el de datos
+                        // de envío. response_json trae, como texto, el JSON con lo que la
+                        // persona llenó en el formulario.
+                        contenido = inter.get("nfm_reply").get("response_json").asText();
+                        tipo = "flow_reply";
+                        log.info("WA respuesta de Flow [{}]: {}", from, contenido);
                     } else {
                         log.info("WA interactive ignorado [{}]: {}", from, sub);
                         return;
@@ -214,6 +227,9 @@ public class WhatsAppServiceImpl implements WhatsAppService {
                 if (tipo.startsWith("button_")) {
                     log.info("[FLUJO] Botón detectado, procesando...");
                     procesarBoton(from, tipo, contenido, cliente);
+                } else if (tipo.equals("flow_reply")) {
+                    log.info("[FLUJO] Respuesta de Flow detectada, procesando...");
+                    procesarRespuestaFlujoEnvio(from, contenido);
                 } else if (tipo.equals("text")) {
                     log.info("[FLUJO] Texto entrante, llamando procesarTextoEntrante...");
                     var agenteRespondio = procesarTextoEntrante(from, contenido, primerMensaje);
@@ -318,13 +334,36 @@ public class WhatsAppServiceImpl implements WhatsAppService {
             case "button_envio_confirmar" -> {
                 var conv = stateStore.get(from);
                 if (conv != null && FLUJO_ENVIO.equals(conv.flujo) && conv.paso == ENVIO_CONFIRMAR) {
-                    envioService.crearConDatos(from, conv.nombre, conv.telefono, conv.cedula,
-                        conv.direccion, conv.ciudad, conv.barrio);
-                    stateStore.remove(from);
+                    // Antes, si crearConDatos fallaba (ej. un dato que no pasa una validación de
+                    // la BD), la excepción se perdía en el catch general del webhook: al cliente
+                    // no le llegaba ningún mensaje, quedaba viendo los botones sin que pasara
+                    // nada, y en BD no quedaba registrada la solicitud — sin ningún rastro de
+                    // qué salió mal. Ahora se registra el motivo real en el log y se le avisa
+                    // al cliente para que pueda reintentar en vez de quedar sin respuesta.
+                    try {
+                        envioService.crearConDatos(from, conv.nombre, conv.telefono, conv.cedula,
+                            conv.direccion, conv.ciudad, conv.barrio);
+                        stateStore.remove(from);
+                        enviarMensaje(from, """
+                            ✅ ¡Gracias! Hemos recibido tus datos de envío.
+                            En breve te contactaremos para coordinar la entrega.""");
+                        log.info("Flujo envío [{}] confirmado y creado", from);
+                    } catch (Exception e) {
+                        log.error("[ENVIO] No se pudo guardar la solicitud de envío de {}: {}", from, e.getMessage(), e);
+                        enviarMensaje(from, """
+                            😕 Tuvimos un problema guardando tus datos. ¿Puedes tocar "Confirmar" de nuevo? Si el problema sigue, un asesor te ayudará. 💜""");
+                    }
+                } else {
+                    // El botón llegó pero el estado en memoria/BD no coincide con lo esperado
+                    // (por ejemplo, si el flujo se venció o se perdió por algún motivo) — antes
+                    // esto no hacía absolutamente nada y el cliente se quedaba sin saber por qué
+                    // su confirmación no sirvió de nada. Ahora se le avisa y se reinicia el flujo
+                    // para que pueda volver a dar sus datos sin quedar bloqueado.
+                    log.warn("[ENVIO] Botón 'Confirmar' de {} llegó sin el estado esperado (conv={}, flujo={}, paso={}) — no se guardó nada, se reinicia el flujo",
+                        from, conv != null, conv == null ? null : conv.flujo, conv == null ? null : conv.paso);
                     enviarMensaje(from, """
-                        ✅ ¡Gracias! Hemos recibido tus datos de envío.
-                        En breve te contactaremos para coordinar la entrega.""");
-                    log.info("Flujo envío [{}] confirmado y creado", from);
+                        Parece que pasó un momento desde que empezamos con tus datos de envío. Vamos a tomarlos de nuevo para asegurarnos de que todo quede bien. 🙏""");
+                    iniciarFlujoEnvio(from);
                 }
             }
             case "button_envio_reiniciar" -> {
@@ -370,9 +409,8 @@ public class WhatsAppServiceImpl implements WhatsAppService {
             conv.paso = PEDIDO_CONFIRMAR_FOTO;
             enviarBotones(from, "📸 Sigamos con la siguiente prenda. ¿Qué quieres hacer con ella?",
                 List.of(
-                    Map.of("id", "si_foto",       "title", "✅ Apartar prenda"),
-                    Map.of("id", "soporte_pago",  "title", "💳 Es pago"),
-                    Map.of("id", "no_foto",       "title", "❌ Nada")
+                    Map.of("id", "si_foto",       "title", "✅ Guardar en baúl"),
+                    Map.of("id", "soporte_pago",  "title", "💳 Registrar pago")
                 ));
         } else {
             enviarMensaje(from, "Ahora la siguiente prenda que mencionaste: \"%s\"."
@@ -674,8 +712,8 @@ public class WhatsAppServiceImpl implements WhatsAppService {
      * Groq y en la práctica resultó poco confiable para esto: respuestas cortadas a mitad de
      * frase, un bug real donde "DANO" nunca se detectaba, y un modelo de Groq que directamente
      * mandaba su razonamiento interno en inglés como si fuera el mensaje para el cliente. En
-     * vez de eso, se le pregunta al cliente con botones (✅ Apartar prenda / 💳 Es pago /
-     * ❌ Nada) — es inmediato, siempre correcto, y es exactamente el mismo flujo que ya se
+     * vez de eso, se le pregunta al cliente con botones (✅ Guardar en baúl / 💳 Registrar pago)
+     * — es inmediato, siempre correcto, y es exactamente el mismo flujo que ya se
      * usaba de respaldo cuando no había ningún agente de IA configurado.
      *
      * La única foto que SÍ se recibe directo sin preguntar nada es la de un reporte de
@@ -1082,9 +1120,8 @@ public class WhatsAppServiceImpl implements WhatsAppService {
         enviarBotones(from, """
             📸 Recibí tu foto. ¿Qué quieres hacer?""",
             List.of(
-                Map.of("id", "si_foto",       "title", "✅ Apartar prenda"),
-                Map.of("id", "soporte_pago",  "title", "💳 Es pago"),
-                Map.of("id", "no_foto",       "title", "❌ Nada")
+                Map.of("id", "si_foto",       "title", "✅ Guardar en baúl"),
+                Map.of("id", "soporte_pago",  "title", "💳 Registrar pago")
             ));
     }
 
@@ -1099,6 +1136,14 @@ public class WhatsAppServiceImpl implements WhatsAppService {
     }
 
     private void iniciarFlujoEnvio(String from) {
+        // Si ya está configurado el Flow de "Datos de envío" (whatsapp.flow-envio-id), se manda
+        // el formulario nativo de WhatsApp en una sola pantalla, en vez del ir y venir de
+        // preguntas de texto de abajo. Mientras esa propiedad esté vacía, el comportamiento no
+        // cambia: sigue siendo el flujo paso a paso de siempre.
+        if (flowEnvioId != null && !flowEnvioId.isBlank()) {
+            enviarFlujoEnvio(from);
+            return;
+        }
         crearConversacionEnvio(from);
         enviarMensaje(from, """
             Te voy a solicitar los siguientes datos para tu envío:
@@ -1112,6 +1157,78 @@ public class WhatsAppServiceImpl implements WhatsAppService {
 
             Empecemos. ¿Cuál es tu nombre completo? 📝""");
         log.info("Iniciado flujo envío paso a paso para {}", from);
+    }
+
+    @Override
+    public void enviarFlujoEnvio(String destinatario) {
+        var body = Map.of(
+            "messaging_product", "whatsapp",
+            "to", destinatario,
+            "type", "interactive",
+            "interactive", Map.of(
+                "type", "flow",
+                "body", Map.of("text", "Para coordinar tu envío necesito estos datos. Tócalo, es rapidito 👇"),
+                "action", Map.of(
+                    "name", "flow",
+                    "parameters", Map.of(
+                        "flow_message_version", "3",
+                        "flow_token", UUID.randomUUID().toString(),
+                        "flow_id", flowEnvioId,
+                        "flow_cta", "Completar datos",
+                        "flow_action", "navigate",
+                        "flow_action_payload", Map.of("screen", "DATOS_ENVIO")
+                    )
+                )
+            )
+        );
+
+        try {
+            var r = whatsappWebClient.post()
+                .uri("/{phoneId}/messages", phoneNumberId)
+                .header("Authorization", "Bearer " + accessToken)
+                .bodyValue(body)
+                .retrieve()
+                .bodyToMono(JsonNode.class)
+                .block();
+            mensajeRepo.save(WaMensaje.builder()
+                    .whatsappFrom(destinatario)
+                    .contenido("[Formulario de datos de envío enviado]")
+                    .tipo("interactive")
+                    .direccion("SALIDA")
+                    .waMessageId(r.get("messages").get(0).get("id").asText())
+                    .build());
+            log.info("[ENVIO] Flow de datos de envío enviado a {}", destinatario);
+        } catch (Exception e) {
+            log.error("Error enviando Flow de envío a {}", destinatario, e);
+            throw new RuntimeException("Error enviando Flow de envío WhatsApp: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Procesa la respuesta del Flow "Datos de envío" cuando el cliente lo completa y toca
+     * "Enviar". No usa ConversationStateStore: al ser un formulario en una sola pantalla, todos
+     * los datos llegan juntos en un solo mensaje, sin necesidad de recordar un paso anterior.
+     */
+    private void procesarRespuestaFlujoEnvio(String from, String responseJson) {
+        try {
+            var datos = new com.fasterxml.jackson.databind.ObjectMapper().readTree(responseJson);
+            var nombre    = datos.hasNonNull("nombre")    ? datos.get("nombre").asText()    : "";
+            var telefono  = datos.hasNonNull("telefono")  ? datos.get("telefono").asText()  : "";
+            var cedula    = datos.hasNonNull("cedula")    ? datos.get("cedula").asText()    : "";
+            var direccion = datos.hasNonNull("direccion") ? datos.get("direccion").asText() : "";
+            var ciudad    = datos.hasNonNull("ciudad")    ? datos.get("ciudad").asText()    : "";
+            var barrio    = datos.hasNonNull("barrio")    ? datos.get("barrio").asText()    : "";
+
+            envioService.crearConDatos(from, nombre, telefono, cedula, direccion, ciudad, barrio);
+            enviarMensaje(from, """
+                ✅ ¡Gracias! Hemos recibido tus datos de envío.
+                En breve te contactaremos para coordinar la entrega.""");
+            log.info("[ENVIO] Formulario (Flow) de envío recibido y guardado para {}", from);
+        } catch (Exception e) {
+            log.error("[ENVIO] No se pudo procesar la respuesta del Flow de envío de {}: {}", from, e.getMessage(), e);
+            enviarMensaje(from, """
+                😕 Tuvimos un problema guardando tus datos. Por favor intenta de nuevo o escríbenos y te ayudamos manualmente. 💜""");
+        }
     }
 
     /**
@@ -1443,6 +1560,18 @@ public class WhatsAppServiceImpl implements WhatsAppService {
                 r -> log.info("Plantilla envío enviada a {}", destinatario),
                 e -> log.error("Error enviando plantilla", e)
             );
+    }
+
+    @Override
+    public void enviarAvisoEnviadoSinGuia(String destinatario, String nombre) {
+        var nombreSaludo = (nombre == null || nombre.isBlank()) ? "" : " " + nombre;
+        enviarMensaje(destinatario, """
+            📦 ¡Tu pedido ya fue enviado%s! ✅
+
+            En los próximos días te compartimos el número de guía por este mismo chat para que puedas hacerle seguimiento.
+
+            ¡Gracias por tu compra! 💜""".formatted(nombreSaludo));
+        log.info("[ENVIO] Aviso de envío (sin guía) enviado a {}", destinatario);
     }
 
     @Override

@@ -83,10 +83,13 @@ public class PedidoServiceImpl implements PedidoService {
             case PAGADO   -> prenda.setEstado(EstadoPrenda.PAGADA);
             case ENVIADO  -> {
                 prenda.setEstado(EstadoPrenda.ENVIADA);
-                whatsAppService.enviarNotificacionEnvio(
+                pedido.setFechaEnvio(java.time.Instant.now());
+                // Al marcar como enviado desde el panel todavía no se conoce el número de
+                // guía (se agrega después), así que siempre se manda el aviso fijo de
+                // "ya se envió, la guía llega pronto" — nunca se inventa ni se deja vacía.
+                whatsAppService.enviarAvisoEnviadoSinGuia(
                     pedido.getCliente().getWhatsapp(),
-                    pedido.getCliente().getNombre(),
-                    pedido.getNumeroGuia()
+                    pedido.getCliente().getNombre()
                 );
             }
             case CANCELADO -> prenda.setEstado(EstadoPrenda.DISPONIBLE);

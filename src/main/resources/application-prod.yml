@@ -10,6 +10,7 @@ whatsapp:
   verify-token: ${WHATSAPP_VERIFY_TOKEN}
   business-account-id: ${WHATSAPP_BUSINESS_ACCOUNT_ID}
   media-dir: ${WHATSAPP_MEDIA_DIR:./media}
+  flow-envio-id: ${WHATSAPP_FLOW_ENVIO_ID:}
 
 agente-ia:
   provider: ${AGENTE_IA_PROVIDER:ninguno}

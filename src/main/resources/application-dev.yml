@@ -24,6 +24,11 @@ whatsapp:
   verify-token: jireh_webhook_2025
   business-account-id: 1676627570373964
   media-dir: ./media
+  # ID del Flow "Datos de envío" en WhatsApp Manager. Vacío por defecto: mientras no se
+  # ponga acá el ID real (después de crear y publicar el Flow), se sigue usando el flujo
+  # de preguntas de texto de siempre — no requiere estar configurado para que el resto siga
+  # funcionando igual.
+  flow-envio-id:
 
 agente-ia:
   provider: gemini

@@ -20,14 +20,15 @@ public record PedidoResponse(
     String notas,
     String nombreDueño,
     String ubicacion,
-    Instant createdAt
+    Instant createdAt,
+    Instant fechaEnvio
 ) {
     public static PedidoResponse from(Pedido p) {
         var c = p.getCliente();
         var pr = p.getPrenda();
         return new PedidoResponse(
             p.getId(), p.getNumero(), p.getEstado(),
-            c == null ? null : new ClienteInfo(c.getNombre(), c.getWhatsapp(), c.getCiudad()),
+            c == null ? null : new ClienteInfo(c.getNombre(), c.getWhatsapp(), c.getCiudad(), c.getDireccion()),
             pr == null ? null : new PrendaInfo(
                 pr.getNombre(), pr.getTalla(), pr.getPrecio(),
                 pr.getLote() == null ? null : new LoteInfo(pr.getLote().getNombre())),
@@ -36,11 +37,11 @@ public record PedidoResponse(
                 ? p.getPrecioFinal().add(p.getCostoEnvio()) : p.getPrecioFinal(),
             p.getNumeroGuia(), p.getTransportadora(), p.getNotas(),
             p.getNombreDueño(), p.getUbicacion(),
-            p.getCreatedAt()
+            p.getCreatedAt(), p.getFechaEnvio()
         );
     }
 
-    public record ClienteInfo(String nombre, String whatsapp, String ciudad) {}
+    public record ClienteInfo(String nombre, String whatsapp, String ciudad, String direccion) {}
     public record PrendaInfo(String nombre, String talla, BigDecimal precio, LoteInfo lote) {}
     public record LoteInfo(String nombre) {}
 }
