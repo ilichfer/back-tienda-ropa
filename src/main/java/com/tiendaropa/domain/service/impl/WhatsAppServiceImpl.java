@@ -1422,7 +1422,10 @@ public class WhatsAppServiceImpl implements WhatsAppService {
     }
 
     private String descargarMediaLocal(String mediaId) {
-        if (mediaId == null || mediaId.isBlank()) return null;
+        if (mediaId == null || mediaId.isBlank()) {
+            log.warn("[MEDIA] descargarMediaLocal llamado sin mediaId (null o vacío)");
+            return null;
+        }
         try {
             var meta = whatsappWebClient.get()
                 .uri("/{mediaId}", mediaId)
@@ -1431,7 +1434,10 @@ public class WhatsAppServiceImpl implements WhatsAppService {
                 .bodyToMono(JsonNode.class)
                 .block();
             var urlStr = meta.has("url") ? meta.get("url").asText() : null;
-            if (urlStr == null) return null;
+            if (urlStr == null) {
+                log.warn("[MEDIA] Meta no devolvió 'url' al consultar metadata de {}: {}", mediaId, meta);
+                return null;
+            }
             var mime = meta.has("mime_type") ? meta.get("mime_type").asText() : "image/jpeg";
 
             var bytes = whatsappWebClient.get()
@@ -1454,7 +1460,10 @@ public class WhatsAppServiceImpl implements WhatsAppService {
      * imagen podía fallar en silencio, perdiendo la foto.
      */
     private String guardarMediaLocal(byte[] bytes, String mimeType) {
-        if (bytes == null || bytes.length == 0) return null;
+        if (bytes == null || bytes.length == 0) {
+            log.warn("[MEDIA] guardarMediaLocal llamado con bytes vacíos o null (mimeType={})", mimeType);
+            return null;
+        }
         try {
             var ext = extensionSegunMime(mimeType);
             var fileName = UUID.randomUUID() + "." + ext;
