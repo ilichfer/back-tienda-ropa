@@ -5,7 +5,9 @@ spring:
   datasource:
     url: jdbc:postgresql://${DB_HOST:localhost}:5432/${DB_NAME:tiendaropa}
     username: ${DB_USERNAME:postgres}
-    password: ${DB_PASSWORD:Ifv.891123}
+    # La contraseña real ya NO va escrita acá. Configura DB_PASSWORD en tu máquina (o en la
+    # configuración de ejecución del IDE) con el valor real de tu Postgres local.
+    password: ${DB_PASSWORD}
     driver-class-name: org.postgresql.Driver
 
   # ddl-auto ya no se sobreescribe acá: se hereda el "none" de application.yml base.
@@ -20,7 +22,10 @@ spring:
 
 whatsapp:
   phone-number-id: 1046206528570803
-  access-token: EAAWQBFVu9lIBRqK211heVttPVcnskz7du7nMegV3B9cxdYLPKhY1ZBQ0hVBJ7aiBtS3x3UcumOnJHSAUA7IWZAYyk95Mu220j2G8phdNjjoumzzMI7w52cZCZAmvJEeHgu8J0IR5aztiiMae6NlErNFhhWjCTq3P3jgumPuZBzFZB5IzWYHfGw0HjvOArxXzGC1wZDZD
+  # El access token real ya NO va escrito acá (es una credencial viva de la API de Meta/WhatsApp
+  # capaz de enviar mensajes y leer medios a nombre del negocio). Configura WHATSAPP_ACCESS_TOKEN
+  # en tu máquina (o en la configuración de ejecución del IDE) con el valor real.
+  access-token: ${WHATSAPP_ACCESS_TOKEN}
   verify-token: jireh_webhook_2025
   business-account-id: 1676627570373964
   media-dir: ./media
