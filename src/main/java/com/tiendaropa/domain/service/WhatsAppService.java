@@ -19,6 +19,12 @@ public interface WhatsAppService {
 
     void enviarBotones(String destinatario, String texto, List<Map<String, String>> botones);
 
+    // Igual que enviarBotones, pero citando otro mensaje (ver enviarMensaje con
+    // replyToWaMessageId) — para cuando hay varias fotos encoladas y hace falta dejar claro
+    // a cuál de ellas se refiere el mensaje. Si replyToWaMessageId es null o vacío, se
+    // comporta igual que el método de 3 parámetros.
+    void enviarBotones(String destinatario, String texto, List<Map<String, String>> botones, String replyToWaMessageId);
+
     // Manda el formulario nativo de WhatsApp (Flow) para pedir los datos de envío en una sola
     // pantalla, en vez del ir y venir de preguntas de texto. Requiere que el Flow ya esté creado
     // y publicado en WhatsApp Manager, y su ID configurado en whatsapp.flow-envio-id.

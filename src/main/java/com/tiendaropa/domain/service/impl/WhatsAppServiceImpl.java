@@ -250,7 +250,7 @@ public class WhatsAppServiceImpl implements WhatsAppService {
                     log.info("[FLUJO] Sin agente IA, continúa con saludos hardcoded");
                 } else if (tipo.equals("image")) {
                     log.info("[FLUJO] Imagen recibida, procesando con agente IA...");
-                    procesarImagenConIA(from, mediaId, mimeType, contenido);
+                    procesarImagenConIA(from, mediaId, mimeType, contenido, waId);
                 } else if (tipo.equals("audio")) {
                     log.info("[FLUJO] Audio recibido, procesando con agente IA...");
                     procesarAudioConIA(from, mediaId, mimeType);
@@ -446,11 +446,14 @@ public class WhatsAppServiceImpl implements WhatsAppService {
         conv.soportePago = false;
         if (siguiente.mediaId != null) {
             conv.paso = PEDIDO_CONFIRMAR_FOTO;
+            // Se cita la foto de esta prenda (si tenemos su wa_message_id) para que quede
+            // claro a cuál de las fotos en cola se refiere, cuando el cliente mandó varias.
             enviarBotones(from, "📸 Sigamos con la siguiente prenda. ¿Qué quieres hacer con ella?",
                 List.of(
                     Map.of("id", "si_foto",       "title", "✅ Guardar en baúl"),
                     Map.of("id", "soporte_pago",  "title", "💳 Registrar pago")
-                ));
+                ),
+                siguiente.waMessageId);
         } else {
             enviarMensaje(from, "Ahora la siguiente prenda que mencionaste: \"%s\"."
                     .formatted(conv.concepto != null ? conv.concepto : "sin descripción"));
@@ -770,7 +773,7 @@ public class WhatsAppServiceImpl implements WhatsAppService {
      * cliente ya avisó con palabras que tiene un problema (esIntencionInconveniente, que es
      * determinístico) y esto solo sigue ese flujo ya iniciado.
      */
-    private void procesarImagenConIA(String from, String mediaId, String mimeType, String caption) {
+    private void procesarImagenConIA(String from, String mediaId, String mimeType, String caption, String waId) {
         // El caption que viene junto con la foto (ej. "¿cuánto vale esto?") no pasa por
         // procesarTextoEntrante, así que esIntencionPrecio nunca se evaluaba para imágenes: se
         // avisa acá también, sin frenar el procesamiento normal de la foto.
@@ -790,7 +793,7 @@ public class WhatsAppServiceImpl implements WhatsAppService {
             return;
         }
 
-        iniciarFlujoPedidoFoto(from, mediaId, mimeType);
+        iniciarFlujoPedidoFoto(from, mediaId, mimeType, waId);
     }
 
     private void procesarAudioConIA(String from, String mediaId, String mimeType) {
@@ -1141,7 +1144,7 @@ public class WhatsAppServiceImpl implements WhatsAppService {
         log.info("[SALDO] Consulta de saldo desde {}, requiereAsesor=true", from);
     }
 
-    private void iniciarFlujoPedidoFoto(String from, String mediaId, String mimeType) {
+    private void iniciarFlujoPedidoFoto(String from, String mediaId, String mimeType, String waId) {
         var convExistente = stateStore.get(from);
         if (convExistente != null && FLUJO_PEDIDO.equals(convExistente.flujo)) {
             // Ya hay una prenda en proceso (esperando botón o precio): esta foto se encola en
@@ -1154,6 +1157,7 @@ public class WhatsAppServiceImpl implements WhatsAppService {
             var pendiente = new PrendaPendiente();
             pendiente.mediaId = mediaId;
             pendiente.mimeType = mimeType;
+            pendiente.waMessageId = waId;
             convExistente.prendasPendientes.add(pendiente);
             enviarMensaje(from, "📸 Recibí otra foto. La registro apenas terminemos con la prenda anterior (tienes %d en cola). 😊"
                     .formatted(convExistente.prendasPendientes.size()));
@@ -1532,6 +1536,11 @@ public class WhatsAppServiceImpl implements WhatsAppService {
 
     @Override
     public void enviarBotones(String destinatario, String texto, List<Map<String, String>> botones) {
+        enviarBotones(destinatario, texto, botones, null);
+    }
+
+    @Override
+    public void enviarBotones(String destinatario, String texto, List<Map<String, String>> botones, String replyToWaMessageId) {
         var buttons = botones.stream()
             .map(b -> Map.of(
                 "type", "reply",
@@ -1539,16 +1548,19 @@ public class WhatsAppServiceImpl implements WhatsAppService {
             ))
             .toList();
 
-        var body = Map.of(
-            "messaging_product", "whatsapp",
-            "to", destinatario,
-            "type", "interactive",
-            "interactive", Map.of(
-                "type", "button",
-                "body", Map.of("text", texto),
-                "action", Map.of("buttons", buttons)
-            )
-        );
+        var body = new java.util.LinkedHashMap<String, Object>();
+        body.put("messaging_product", "whatsapp");
+        body.put("to", destinatario);
+        body.put("type", "interactive");
+        body.put("interactive", Map.of(
+            "type", "button",
+            "body", Map.of("text", texto),
+            "action", Map.of("buttons", buttons)
+        ));
+        var citando = replyToWaMessageId != null && !replyToWaMessageId.isBlank();
+        if (citando) {
+            body.put("context", Map.of("message_id", replyToWaMessageId));
+        }
 
         try {
             var r = whatsappWebClient.post()
@@ -1566,6 +1578,7 @@ public class WhatsAppServiceImpl implements WhatsAppService {
                     .tipo("interactive")
                     .direccion("SALIDA")
                     .waMessageId(r.get("messages").get(0).get("id").asText())
+                    .contextWaMessageId(citando ? replyToWaMessageId : null)
                     .build());
         } catch (Exception e) {
             log.error("Error enviando botones WA a {}", destinatario, e);
