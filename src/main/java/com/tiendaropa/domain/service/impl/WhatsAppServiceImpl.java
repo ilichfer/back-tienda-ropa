@@ -106,7 +106,16 @@ public class WhatsAppServiceImpl implements WhatsAppService {
             var change   = entry.get("changes").get(0).get("value");
             var messages = change.get("messages");
 
-            if (messages == null || messages.isEmpty()) return;
+            if (messages == null || messages.isEmpty()) {
+                // No es un mensaje nuevo — puede ser una confirmación de entrega (statuses:
+                // sent/delivered/read/failed) de un mensaje que nosotros mandamos. Antes esto
+                // se ignoraba por completo y el panel nunca sabía si un envío realmente llegó.
+                var statuses = change.get("statuses");
+                if (statuses != null && !statuses.isEmpty()) {
+                    statuses.forEach(this::actualizarEstadoEntrega);
+                }
+                return;
+            }
 
             var msg  = messages.get(0);
             var from = msg.get("from").asText();
@@ -275,6 +284,36 @@ public class WhatsAppServiceImpl implements WhatsAppService {
 
         } catch (Exception e) {
             log.error("Error procesando webhook WA", e);
+        }
+    }
+
+    // Un objeto de "statuses" del webhook luce como:
+    // { "id": "<wa_message_id>", "status": "delivered", "timestamp": "...",
+    //   "errors": [{ "title": "...", "message": "..." }] }  (errors solo si status=failed)
+    private void actualizarEstadoEntrega(JsonNode status) {
+        try {
+            var waMessageId = status.hasNonNull("id") ? status.get("id").asText() : null;
+            var estado = status.hasNonNull("status") ? status.get("status").asText() : null;
+            if (waMessageId == null || estado == null) return;
+
+            var mensaje = mensajeRepo.findByWaMessageId(waMessageId).orElse(null);
+            if (mensaje == null) {
+                // Puede pasar si el mensaje se borró de nuestra BD (borrar conversación) pero
+                // Meta todavía manda confirmaciones tardías del que ya no existe — no es un error.
+                return;
+            }
+
+            mensaje.setEstadoEntrega(estado);
+            if ("failed".equals(estado) && status.has("errors") && !status.get("errors").isEmpty()) {
+                var err = status.get("errors").get(0);
+                var titulo = err.hasNonNull("title") ? err.get("title").asText() : "Error desconocido";
+                var detalle = err.hasNonNull("message") ? err.get("message").asText() : "";
+                mensaje.setErrorEntrega(detalle.isBlank() ? titulo : titulo + ": " + detalle);
+            }
+            mensajeRepo.save(mensaje);
+            log.info("[ESTADO] {} -> {} ({})", waMessageId, estado, mensaje.getWhatsappFrom());
+        } catch (Exception e) {
+            log.warn("No se pudo procesar status de entrega: {}", e.getMessage());
         }
     }
 
@@ -1560,6 +1599,52 @@ public class WhatsAppServiceImpl implements WhatsAppService {
                 r -> log.info("Plantilla envío enviada a {}", destinatario),
                 e -> log.error("Error enviando plantilla", e)
             );
+    }
+
+    @Override
+    public String enviarPlantillaMeta(String destinatario, String nombrePlantilla, String idioma, List<String> valoresVariables) {
+        var parametros = valoresVariables.stream()
+            .map(v -> (Object) Map.of("type", "text", "text", v))
+            .toArray();
+
+        var componentes = parametros.length == 0
+            ? new Object[]{}
+            : new Object[]{ Map.of("type", "body", "parameters", parametros) };
+
+        var body = Map.of(
+            "messaging_product", "whatsapp",
+            "to", destinatario,
+            "type", "template",
+            "template", Map.of(
+                "name", nombrePlantilla,
+                "language", Map.of("code", idioma == null || idioma.isBlank() ? "es" : idioma),
+                "components", componentes
+            )
+        );
+
+        try {
+            var r = whatsappWebClient.post()
+                .uri("/{phoneId}/messages", phoneNumberId)
+                .header("Authorization", "Bearer " + accessToken)
+                .bodyValue(body)
+                .retrieve()
+                .bodyToMono(JsonNode.class)
+                .block();
+
+            var waMessageId = r.get("messages").get(0).get("id").asText();
+            mensajeRepo.save(WaMensaje.builder()
+                    .whatsappFrom(destinatario)
+                    .contenido("[Plantilla: " + nombrePlantilla + "] " + String.join(" · ", valoresVariables))
+                    .tipo("template")
+                    .direccion("SALIDA")
+                    .waMessageId(waMessageId)
+                    .build());
+            log.info("[BROADCAST] Plantilla '{}' enviada a {}", nombrePlantilla, destinatario);
+            return waMessageId;
+        } catch (Exception e) {
+            log.error("[BROADCAST] Error enviando plantilla '{}' a {}: {}", nombrePlantilla, destinatario, e.getMessage());
+            throw new RuntimeException("Error enviando plantilla WhatsApp: " + e.getMessage(), e);
+        }
     }
 
     @Override

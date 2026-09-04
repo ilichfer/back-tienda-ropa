@@ -52,6 +52,17 @@ public class WaMensaje {
     @Builder.Default
     private Boolean leido = false;
 
+    // Estado de entrega reportado por el webhook de "statuses" de Meta: sent, delivered,
+    // read o failed. Null mientras no llegue ninguna confirmación (o para mensajes ENTRADA,
+    // que nunca tienen estado de entrega propio).
+    @Column(name = "estado_entrega", length = 20)
+    private String estadoEntrega;
+
+    // Motivo cuando estadoEntrega = "failed" (ej. "plantilla no aprobada", "fuera de ventana
+    // de 24h"), tomado de errors[0].title del webhook de statuses.
+    @Column(name = "error_entrega", columnDefinition = "text")
+    private String errorEntrega;
+
     @Column(insertable = false, updatable = false)
     private Instant createdAt;
 }

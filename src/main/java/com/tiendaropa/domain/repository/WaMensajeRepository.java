@@ -22,6 +22,10 @@ public interface WaMensajeRepository extends JpaRepository<WaMensaje, UUID> {
 
     Optional<WaMensaje> findFirstByWhatsappFromAndDireccionOrderByCreatedAtDesc(String whatsappFrom, String direccion);
 
+    // Para actualizar el estado de entrega (sent/delivered/read/failed) que llega por el
+    // webhook de "statuses" de Meta, referenciando el mensaje saliente por su wa_message_id.
+    Optional<WaMensaje> findByWaMessageId(String waMessageId);
+
     boolean existsByWhatsappFrom(String whatsappFrom);
 
     @Modifying

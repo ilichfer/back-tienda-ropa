@@ -26,6 +26,13 @@ public interface WhatsAppService {
 
     void enviarNotificacionEnvio(String destinatario, String nombre, String guia);
 
+    // Manda cualquier plantilla ya aprobada por Meta (WhatsApp Manager), con sus variables
+    // {{1}}, {{2}}... en orden — generaliza el patrón de enviarNotificacionEnvio para poder
+    // usar cualquier plantilla registrada en wa_plantillas_meta, no solo "notificacion_envio".
+    // Devuelve el wa_message_id del mensaje enviado (o lanza si Meta lo rechaza, ej. plantilla
+    // no aprobada o destinatario fuera de la ventana de 24h sin plantilla válida).
+    String enviarPlantillaMeta(String destinatario, String nombrePlantilla, String idioma, List<String> valoresVariables);
+
     // Mensaje fijo que se manda al presionar "Marcar como enviado" desde el panel, cuando
     // todavía no se conoce el número de guía (avisa que el pedido salió y que la guía se
     // envía después). No depende de IA: es siempre el mismo texto.
