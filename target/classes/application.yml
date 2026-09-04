@@ -2,7 +2,9 @@ spring:
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/tiendaropa}
     username: ${SPRING_DATASOURCE_USERNAME:tiendaropa}
-    password: ${SPRING_DATASOURCE_PASSWORD:Ifv.891123}
+    # Sin valor por defecto real: cada ambiente (dev/prod) debe traer su propio
+    # SPRING_DATASOURCE_PASSWORD. Antes había una contraseña real hardcodeada acá.
+    password: ${SPRING_DATASOURCE_PASSWORD}
     hikari:
       maximum-pool-size: 10
       minimum-idle: 2
