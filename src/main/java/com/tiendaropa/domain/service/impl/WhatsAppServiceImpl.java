@@ -354,8 +354,18 @@ public class WhatsAppServiceImpl implements WhatsAppService {
                 }
             }
             case "button_apartar_solo" -> {
-                stateStore.remove(from);
-                enviarMensaje(from, "✅ Listo, tu prenda quedó apartada. Cuando quieras pagar o enviar, avísanos. 💜");
+                // Este botón viene del mensaje "¿Quieres que te lo enviemos?" (paso
+                // PEDIDO_ENVIO). Si para cuando llega el tap ya no hay ese flujo activo en ese
+                // paso —por ejemplo, el cliente tocó un botón viejo de una conversación ya
+                // abandonada mientras ahora está en medio de un reporte de inconveniente—, no
+                // hay nada que confirmar: se ignora, igual que ya hacen button_si_foto,
+                // button_soporte_pago, etc. Antes esto respondía "tu prenda quedó apartada"
+                // sin importar el contexto, lo que confundía al cliente.
+                var conv = stateStore.get(from);
+                if (conv != null && FLUJO_PEDIDO.equals(conv.flujo) && conv.paso == PEDIDO_ENVIO) {
+                    stateStore.remove(from);
+                    enviarMensaje(from, "✅ Listo, tu prenda quedó apartada. Cuando quieras pagar o enviar, avísanos. 💜");
+                }
             }
             case "button_inconveniente_mas_fotos" -> {
                 var conv = stateStore.get(from);
