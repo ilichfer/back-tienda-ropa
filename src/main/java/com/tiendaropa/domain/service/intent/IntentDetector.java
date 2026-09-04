@@ -146,7 +146,10 @@ public class IntentDetector {
                 // matchea con la palabra suelta "pedido" y terminaba abriendo por error el
                 // flujo de apartar una prenda nueva en vez del de inconveniente.
                 || t.contains("hizo falta") || t.contains("hicieron falta")
-                || t.contains("faltó") || t.contains("falto");
+                || t.contains("faltó") || t.contains("falto")
+                // "no llegó"/"no llego" no cubre cuando el cliente mete un "me" en el medio,
+                // ej. "una no me llegó" (una prenda no le llegó, sí llegaron las demás).
+                || t.contains("no me llegó") || t.contains("no me llego");
     }
 
     // Detecta cuando el cliente pregunta por el horario/fecha del próximo live de TikTok. No
