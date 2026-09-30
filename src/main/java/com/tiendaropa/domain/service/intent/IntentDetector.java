@@ -231,6 +231,43 @@ public class IntentDetector {
                 || t.contains("cuando envian") || t.contains("cuándo envían");
     }
 
+    // Texto que acompaña una foto (caption) diciendo claramente que es un comprobante de pago.
+    // Es deliberadamente estricto: con esto la foto se registra como abono SIN preguntar, así
+    // que no incluye la palabra suelta "pago" (ej. "¿esta la pago mañana?" no es un comprobante).
+    public boolean esIntencionComprobantePago(String contenido) {
+        if (contenido == null) return false;
+        var t = contenido.toLowerCase();
+        return t.contains("comprobante") || t.contains("soporte de pago")
+                || t.contains("transferí") || t.contains("transferi ") || t.endsWith("transferi")
+                || t.contains("transferencia")
+                || t.contains("consigné") || t.contains("consigne ") || t.endsWith("consigne")
+                || t.contains("consignación") || t.contains("consignacion")
+                || t.contains("ya pagué") || t.contains("ya pague")
+                || t.contains("pago realizado") || t.contains("ya te pagué") || t.contains("ya te pague")
+                || t.contains("aboné") || t.contains("abone ") || t.endsWith("abone");
+    }
+
+    // Lo que escribe el cliente EN VEZ de tocar un botón cuando se le pregunta qué hacer con una
+    // foto ("✅ Guardar en baúl" / "💳 Es un pago"). Acá sí vale "pago" suelto porque la
+    // pregunta ya está acotada a esas opciones.
+    public boolean esRespuestaFotoPago(String contenido) {
+        if (contenido == null) return false;
+        var t = contenido.toLowerCase();
+        return esIntencionComprobantePago(contenido)
+                || t.contains("pago") || t.contains("pagué") || t.contains("pague")
+                || t.contains("abono") || t.contains("nequi") || t.contains("daviplata");
+    }
+
+    public boolean esRespuestaFotoBaul(String contenido) {
+        if (contenido == null) return false;
+        var t = contenido.toLowerCase();
+        return t.contains("baul") || t.contains("baúl")
+                || t.contains("guard") || t.contains("guárd")
+                || t.contains("apart") || t.contains("separ") || t.contains("reserv")
+                || t.contains("la quiero") || t.contains("lo quiero") || t.contains("para mi")
+                || t.contains("prenda");
+    }
+
     public boolean esNoSe(String contenido) {
         if (contenido == null) return false;
         var t = contenido.toLowerCase().trim();

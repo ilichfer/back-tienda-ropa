@@ -14,7 +14,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -25,6 +28,8 @@ public class CuentaServiceImpl implements CuentaService {
     private final CuentaRepository cuentaRepo;
     private final CuentaMovimientoRepository movRepo;
     private final ClienteRepository clienteRepo;
+
+    private static final long MINUTOS_PARA_ANULAR = 30;
 
     @Override
     @Transactional(readOnly = true)
@@ -99,9 +104,8 @@ public class CuentaServiceImpl implements CuentaService {
     public CuentaMovimientoResponse completarValor(UUID movimientoId, Long valor) {
         var mov = movRepo.findById(movimientoId)
                 .orElseThrow(() -> new IllegalArgumentException("Movimiento no encontrado"));
-        if (!"CARGO".equals(mov.getTipo())) {
-            throw new IllegalArgumentException("Solo los cargos tienen valor");
-        }
+        // Los abonos también: el bot ya no le pregunta al cliente cuánto pagó al recibir la
+        // foto del comprobante, así que el valor lo completa el operador desde el panel.
         mov.setValor(valor);
         if ("VALOR_POR_DEFINIR".equals(mov.getEstado())) {
             mov.setEstado("CONFIRMADO");
@@ -141,6 +145,11 @@ public class CuentaServiceImpl implements CuentaService {
         if (!"ABONO".equals(mov.getTipo())) {
             throw new IllegalArgumentException("Solo los abonos se validan");
         }
+        // Un abono sin valor (comprobante recibido por WhatsApp que nadie ha revisado aún) no
+        // se puede confirmar: sumaría $0 al saldo sin que nadie lo note.
+        if (mov.getValor() == null) {
+            throw new IllegalArgumentException("Primero registra el valor del pago");
+        }
         mov.setEstado("CONFIRMADO");
         movRepo.save(mov);
         log.info("ABONO validado: {}", movimientoId);
@@ -156,6 +165,31 @@ public class CuentaServiceImpl implements CuentaService {
         movRepo.save(mov);
         log.info("ABONO rechazado: {}", movimientoId);
         return CuentaMovimientoResponse.from(mov);
+    }
+
+    @Override
+    @Transactional
+    public Optional<CuentaMovimientoResponse> anularDesdeBot(UUID movimientoId, String whatsapp) {
+        var mov = movRepo.findById(movimientoId).orElse(null);
+        if (mov == null) return Optional.empty();
+        if (!whatsapp.equals(mov.getCuenta().getCliente().getWhatsapp())) {
+            log.warn("Intento de anular movimiento {} desde {}, que no es el dueño de la cuenta", movimientoId, whatsapp);
+            return Optional.empty();
+        }
+        // Solo se puede deshacer lo que el operador todavía no tocó: un cargo sin valor o un
+        // abono sin validar. Si ya lo revisaron desde el panel, la corrección la hace un humano.
+        var sinRevisar = ("CARGO".equals(mov.getTipo()) && "VALOR_POR_DEFINIR".equals(mov.getEstado()))
+                || ("ABONO".equals(mov.getTipo()) && "PENDIENTE_VALIDAR".equals(mov.getEstado()) && mov.getValor() == null);
+        var reciente = mov.getCreatedAt() == null
+                || mov.getCreatedAt().isAfter(Instant.now().minus(MINUTOS_PARA_ANULAR, ChronoUnit.MINUTES));
+        if (!sinRevisar || !reciente) {
+            log.info("Movimiento {} no se anula desde el bot (estado={}, creado={})", movimientoId, mov.getEstado(), mov.getCreatedAt());
+            return Optional.empty();
+        }
+        var resp = CuentaMovimientoResponse.from(mov);
+        movRepo.delete(mov);
+        log.info("{} {} anulado por el cliente {} desde el bot", mov.getTipo(), movimientoId, whatsapp);
+        return Optional.of(resp);
     }
 
     private Cuenta getOrCreateCuenta(String whatsapp) {

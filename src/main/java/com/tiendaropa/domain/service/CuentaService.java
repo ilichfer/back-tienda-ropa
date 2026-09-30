@@ -4,6 +4,7 @@ import com.tiendaropa.web.dto.response.CuentaMovimientoResponse;
 import com.tiendaropa.web.dto.response.CuentaResponse;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 public interface CuentaService {
@@ -29,4 +30,11 @@ public interface CuentaService {
     CuentaMovimientoResponse validarAbono(UUID movimientoId);
 
     CuentaMovimientoResponse rechazarAbono(UUID movimientoId);
+
+    /**
+     * Borra un cargo/abono que el cliente registró por error desde el bot (botón "Me
+     * equivoqué"). Solo aplica si es de ese cliente, es reciente y el operador aún no lo revisó;
+     * si no, devuelve vacío y no toca nada.
+     */
+    Optional<CuentaMovimientoResponse> anularDesdeBot(UUID movimientoId, String whatsapp);
 }

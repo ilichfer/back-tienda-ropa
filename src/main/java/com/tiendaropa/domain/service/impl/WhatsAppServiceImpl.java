@@ -37,6 +37,8 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantLock;
 
 @Service
 @RequiredArgsConstructor
@@ -95,6 +97,16 @@ public class WhatsAppServiceImpl implements WhatsAppService {
     private static final int INC_DESCRIPCION = 0;
     private static final int INC_FOTOS       = 1;
     private static final int INC_CONFIRMAR   = 2;
+
+    // Cuánto tiempo hacia atrás se mira lo que escribió el cliente antes de una foto para
+    // entender de qué se trata (ej. "no me llegó esta prenda" y luego la foto).
+    private static final int MINUTOS_CONTEXTO_FOTO = 10;
+
+    // Un candado por número: los webhooks corren en paralelo (@Async), y un texto y una foto
+    // del mismo cliente podían procesarse a la vez pisándose el estado de la conversación
+    // (ej. el texto abría el reporte de inconveniente y la foto, en paralelo, lo reemplazaba
+    // por el flujo de apartar). Así los mensajes de un mismo número se procesan de a uno.
+    private final ConcurrentHashMap<String, ReentrantLock> candadosPorNumero = new ConcurrentHashMap<>();
 
 
     // Meta reintenta (y reenvía duplicado) un webhook si no le respondemos rápido, y este
@@ -220,70 +232,76 @@ public class WhatsAppServiceImpl implements WhatsAppService {
             }
 
             log.info("=== WEBHOOK WA === from={} type={} primerMensaje={}", from, tipo, primerMensaje);
-            stateStore.recuperarSiNecesario(from);
-
-            // Todo lo que sigue queda envuelto en un try/finally: antes cada punto de salida
-            // (cada "return" de acá abajo) tenía que acordarse de marcar la interacción y
-            // persistir la conversación A MANO antes de retornar, y era fácil que un flujo
-            // nuevo lo olvidara — el estado quedaba sin guardar en BD hasta el próximo mensaje
-            // que sí pasara por el camino correcto. Con el finally esto pasa siempre, sin
-            // depender de que cada rama nueva se acuerde de hacerlo, e incluso si algo de acá
-            // adentro lanza una excepción (antes esos casos NO persistían nada).
+            var candado = candadosPorNumero.computeIfAbsent(from, k -> new ReentrantLock());
+            candado.lock();
             try {
-                if (cliente != null && Boolean.TRUE.equals(cliente.getBotSilenciado())) {
-                    // Interruptor manual del operador: el mensaje queda guardado en el historial
-                    // (ya se hizo arriba) pero el bot no procesa ni responde nada más.
-                    log.info("[BOT] Bot silenciado manualmente para {}, no se procesa automáticamente", from);
-                    return;
-                }
+                stateStore.recuperarSiNecesario(from);
 
-                if (tipo.startsWith("button_")) {
-                    log.info("[FLUJO] Botón detectado, procesando...");
-                    procesarBoton(from, tipo, contenido, cliente);
-                } else if (tipo.equals("flow_reply")) {
-                    log.info("[FLUJO] Respuesta de Flow detectada, procesando...");
-                    procesarRespuestaFlujoEnvio(from, contenido);
-                } else if (tipo.equals("text")) {
-                    log.info("[FLUJO] Texto entrante, llamando procesarTextoEntrante...");
-                    var agenteRespondio = procesarTextoEntrante(from, contenido, primerMensaje);
-                    log.info("[FLUJO] procesarTextoEntrante devolvió agenteRespondio={}", agenteRespondio);
-                    if (agenteRespondio) {
-                        log.info("[FLUJO] Agente IA respondió, saltando saludos hardcoded");
+                // Todo lo que sigue queda envuelto en un try/finally: antes cada punto de salida
+                // (cada "return" de acá abajo) tenía que acordarse de marcar la interacción y
+                // persistir la conversación A MANO antes de retornar, y era fácil que un flujo
+                // nuevo lo olvidara — el estado quedaba sin guardar en BD hasta el próximo mensaje
+                // que sí pasara por el camino correcto. Con el finally esto pasa siempre, sin
+                // depender de que cada rama nueva se acuerde de hacerlo, e incluso si algo de acá
+                // adentro lanza una excepción (antes esos casos NO persistían nada).
+                try {
+                    if (cliente != null && Boolean.TRUE.equals(cliente.getBotSilenciado())) {
+                        // Interruptor manual del operador: el mensaje queda guardado en el historial
+                        // (ya se hizo arriba) pero el bot no procesa ni responde nada más.
+                        log.info("[BOT] Bot silenciado manualmente para {}, no se procesa automáticamente", from);
                         return;
                     }
-                    log.info("[FLUJO] Sin agente IA, continúa con saludos hardcoded");
-                } else if (tipo.equals("image")) {
-                    log.info("[FLUJO] Imagen recibida, procesando con agente IA...");
-                    procesarImagenConIA(from, mediaId, mimeType, contenido, waId);
-                } else if (tipo.equals("audio")) {
-                    log.info("[FLUJO] Audio recibido, procesando con agente IA...");
-                    procesarAudioConIA(from, mediaId, mimeType);
-                } else if (tipo.equals("location")) {
-                    procesarUbicacion(from, contenido);
-                }
 
-                if (tipo.equals("text")) {
-                    var ultima = stateStore.getUltimaInteraccion(from);
-                    var convVieja = stateStore.existe(from)
-                            && ultima != null
-                            && ChronoUnit.HOURS.between(ultima, Instant.now()) >= 2;
-                    if (convVieja) {
-                        stateStore.remove(from);
+                    if (tipo.startsWith("button_")) {
+                        log.info("[FLUJO] Botón detectado, procesando...");
+                        procesarBoton(from, tipo, contenido, cliente);
+                    } else if (tipo.equals("flow_reply")) {
+                        log.info("[FLUJO] Respuesta de Flow detectada, procesando...");
+                        procesarRespuestaFlujoEnvio(from, contenido);
+                    } else if (tipo.equals("text")) {
+                        log.info("[FLUJO] Texto entrante, llamando procesarTextoEntrante...");
+                        var agenteRespondio = procesarTextoEntrante(from, contenido, primerMensaje);
+                        log.info("[FLUJO] procesarTextoEntrante devolvió agenteRespondio={}", agenteRespondio);
+                        if (agenteRespondio) {
+                            log.info("[FLUJO] Agente IA respondió, saltando saludos hardcoded");
+                            return;
+                        }
+                        log.info("[FLUJO] Sin agente IA, continúa con saludos hardcoded");
+                    } else if (tipo.equals("image")) {
+                        log.info("[FLUJO] Imagen recibida, procesando con agente IA...");
+                        procesarImagenConIA(from, mediaId, mimeType, contenido, waId);
+                    } else if (tipo.equals("audio")) {
+                        log.info("[FLUJO] Audio recibido, procesando con agente IA...");
+                        procesarAudioConIA(from, mediaId, mimeType);
+                    } else if (tipo.equals("location")) {
+                        procesarUbicacion(from, contenido);
                     }
 
-                    if (primerMensaje) {
-                        enviarMensaje(from, """
-                            ¡Hola! 👋 Bienvenido/a al Patio de Ropa Jireh 🛍️💜
+                    if (tipo.equals("text")) {
+                        var ultima = stateStore.getUltimaInteraccion(from);
+                        var convVieja = stateStore.existe(from)
+                                && ultima != null
+                                && ChronoUnit.HOURS.between(ultima, Instant.now()) >= 2;
+                        if (convVieja) {
+                            stateStore.remove(from);
+                        }
 
-                            Para poder atenderte mejor, por favor me regalas tu usuario de TikTok y tu nombre completo 😊
+                        if (primerMensaje) {
+                            enviarMensaje(from, """
+                                ¡Hola! 👋 Bienvenido/a al Patio de Ropa Jireh 🛍️💜
 
-                            Y no te vayas a perder nuestros lives: únete a nuestro grupo de WhatsApp, ahí avisamos el día y la hora de cada uno 👇
-                            %s""".formatted(LINK_GRUPO_WHATSAPP));
+                                Para poder atenderte mejor, por favor me regalas tu usuario de TikTok y tu nombre completo 😊
+
+                                Y no te vayas a perder nuestros lives: únete a nuestro grupo de WhatsApp, ahí avisamos el día y la hora de cada uno 👇
+                                %s""".formatted(LINK_GRUPO_WHATSAPP));
+                        }
                     }
+                } finally {
+                    stateStore.marcarInteraccion(from);
+                    stateStore.persistir(from);
                 }
             } finally {
-                stateStore.marcarInteraccion(from);
-                stateStore.persistir(from);
+                candado.unlock();
             }
 
         } catch (Exception e) {
@@ -322,6 +340,12 @@ public class WhatsAppServiceImpl implements WhatsAppService {
     }
 
     private void procesarBoton(String from, String tipo, String contenido, Cliente cliente) {
+        // El id de este botón lleva el id del movimiento a deshacer (ver registrarCargoDesdeBot y confirmarAbonoFoto),
+        // así funciona aunque la conversación ya haya terminado o avanzado a otra prenda.
+        if (tipo.startsWith("button_deshacer_")) {
+            deshacerRegistroFoto(from, tipo.substring("button_deshacer_".length()));
+            return;
+        }
         switch (tipo) {
             case "button_envio" -> iniciarFlujoEnvio(from);
             case "button_apartar" -> {
@@ -337,17 +361,28 @@ public class WhatsAppServiceImpl implements WhatsAppService {
                 enviarMensaje(from, """
                     Te comunicaré con una asesora. Por favor espera, en breve te atenderemos.""");
             }
+            // Al guardar en baúl o registrar un pago con foto ya NO se le pregunta el valor al
+            // cliente (tomaba tiempo y confundía): el cargo queda "valor por definir" y el abono
+            // "por validar", y el operador pone el valor desde el panel de Cuentas.
             case "button_si_foto" -> {
                 var conv = stateStore.get(from);
                 if (conv != null && FLUJO_PEDIDO.equals(conv.flujo) && conv.paso == PEDIDO_CONFIRMAR_FOTO) {
-                    preguntarValor(from, conv);
+                    registrarCargoDesdeBot(from, conv, null);
                 }
             }
             case "button_soporte_pago" -> {
                 var conv = stateStore.get(from);
                 if (conv != null && FLUJO_PEDIDO.equals(conv.flujo) && conv.paso == PEDIDO_CONFIRMAR_FOTO) {
                     conv.soportePago = true;
-                    preguntarValorPago(from, conv);
+                    registrarAbonoDesdeBot(from, conv, null);
+                }
+            }
+            case "button_foto_problema" -> {
+                var conv = stateStore.get(from);
+                if (conv != null && FLUJO_PEDIDO.equals(conv.flujo) && conv.paso == PEDIDO_CONFIRMAR_FOTO) {
+                    var fotos = fotosDelPedidoEnCurso(conv);
+                    stateStore.remove(from);
+                    iniciarInconvenienteConFotos(from, "", fotos);
                 }
             }
             case "button_no_foto" -> {
@@ -437,12 +472,6 @@ public class WhatsAppServiceImpl implements WhatsAppService {
             Si no lo recuerdas, escribe "no sé".""");
     }
 
-    private void preguntarValorPago(String from, ConversacionCliente conv) {
-        conv.paso = PEDIDO_VALOR_TEXTO;
-        enviarMensaje(from, """
-            💳 ¿Cuánto pagaste? Escribe el valor en números, por ejemplo: 45000.""");
-    }
-
     /**
      * Si quedan prendas en cola (fotos que llegaron mientras se procesaba otra, o prendas
      * sin foto agregadas a mitad del flujo), toma la siguiente y continúa preguntando por
@@ -458,16 +487,12 @@ public class WhatsAppServiceImpl implements WhatsAppService {
         conv.mediaPath = null;
         conv.concepto = siguiente.descripcionSinFoto;
         conv.soportePago = false;
+        conv.fotoWaMessageId = siguiente.waMessageId;
         if (siguiente.mediaId != null) {
             conv.paso = PEDIDO_CONFIRMAR_FOTO;
             // Se cita la foto de esta prenda (si tenemos su wa_message_id) para que quede
             // claro a cuál de las fotos en cola se refiere, cuando el cliente mandó varias.
-            enviarBotones(from, "📸 Sigamos con la siguiente prenda. ¿Qué quieres hacer con ella?",
-                List.of(
-                    Map.of("id", "si_foto",       "title", "✅ Guardar en baúl"),
-                    Map.of("id", "soporte_pago",  "title", "💳 Registrar pago")
-                ),
-                siguiente.waMessageId);
+            enviarBotonesFoto(from, "📸 Sigamos con la siguiente foto. ¿Qué hacemos con ella?", siguiente.waMessageId);
         } else {
             enviarMensaje(from, "Ahora la siguiente prenda que mencionaste: \"%s\"."
                     .formatted(conv.concepto != null ? conv.concepto : "sin descripción"));
@@ -619,9 +644,18 @@ public class WhatsAppServiceImpl implements WhatsAppService {
                     enviarMensaje(from, "📸 Perfecto, envíame la siguiente foto del problema.");
                     return false;
                 }
+                // Lo que escriba el cliente acá casi siempre es un detalle más del problema ("era
+                // la blusa negra", "la pedí talla M"): se agrega a la descripción del reporte en
+                // vez de perderse. Si es el mismo texto que ya abrió el reporte (llegó justo
+                // antes que la foto y se procesó después), no se repite nada.
+                var detalle = contenido.trim();
+                if (conv.descripcion != null && conv.descripcion.contains(detalle)) {
+                    return false;
+                }
+                agregarADescripcion(conv, detalle);
                 var mensajeRecordatorio = conv.paso == INC_FOTOS
-                        ? "📸 Aún necesito la foto del problema para tu reporte. Envíamela cuando puedas, o escribe \"listo\" si prefieres continuar sin foto."
-                        : "📸 ¿Tienes otra foto del problema, o ya está listo tu reporte?";
+                        ? "✍️ Lo anoté en tu reporte. Envíame la foto del problema, o toca \"Listo\" si prefieres continuar sin foto."
+                        : "✍️ Lo anoté en tu reporte. ¿Tienes otra foto del problema, o ya está listo?";
                 enviarBotones(from, mensajeRecordatorio,
                     List.of(
                         Map.of("id", "inconveniente_mas_fotos", "title", "📸 Sí, tengo más"),
@@ -640,9 +674,33 @@ public class WhatsAppServiceImpl implements WhatsAppService {
             // inconveniente con mi ropa") no calzaba con ningún if/else de abajo y se quedaba
             // sin ninguna respuesta — el bot simplemente no decía nada.
             if (intentDetector.esIntencionInconveniente(contenido)) {
-                log.info("[TEXTO] Flujo PEDIDO activo pero detectada intención de inconveniente, eliminando conversación vieja");
+                // Si hay fotos esperando respuesta (ej. el cliente mandó la foto y enseguida
+                // escribió "no me llegó esta prenda"), esas fotos son del problema: pasan al
+                // reporte en vez de perderse o terminar registradas como pago/prenda.
+                var fotos = fotosDelPedidoEnCurso(conv);
                 stateStore.remove(from);
+                if (!fotos.isEmpty()) {
+                    log.info("[TEXTO] Flujo PEDIDO con {} foto(s) sin clasificar + intención de inconveniente: las fotos pasan al reporte", fotos.size());
+                    iniciarInconvenienteConFotos(from, contenido, fotos);
+                    return false;
+                }
+                log.info("[TEXTO] Flujo PEDIDO activo pero detectada intención de inconveniente, eliminando conversación vieja");
                 return procesarTextoEntrante(from, contenido, false);
+            }
+            if (conv.paso == PEDIDO_CONFIRMAR_FOTO) {
+                // El cliente escribió en vez de tocar un botón. Antes esto no tenía ningún caso
+                // y el bot se quedaba callado.
+                if (intentDetector.esRespuestaFotoPago(contenido)) {
+                    log.info("[TEXTO] Respuesta escrita a la foto interpretada como pago");
+                    conv.soportePago = true;
+                    registrarAbonoDesdeBot(from, conv, null);
+                } else if (intentDetector.esRespuestaFotoBaul(contenido)) {
+                    log.info("[TEXTO] Respuesta escrita a la foto interpretada como guardar en baúl");
+                    registrarCargoDesdeBot(from, conv, null);
+                } else {
+                    enviarBotonesFoto(from, "No te entendí bien 🙈 Toca una opción para esta foto 👇", conv.fotoWaMessageId);
+                }
+                return false;
             }
             if (conv.paso == PEDIDO_NOMBRE) {
                 conv.concepto = contenido.trim();
@@ -773,41 +831,165 @@ public class WhatsAppServiceImpl implements WhatsAppService {
     }
 
     /**
-     * Qué hacer con una foto que llega por WhatsApp. Ya NO se le pide a ninguna IA que adivine
-     * si es una prenda, un comprobante de pago o una foto de daño — se probó con Gemini y con
-     * Groq y en la práctica resultó poco confiable para esto: respuestas cortadas a mitad de
-     * frase, un bug real donde "DANO" nunca se detectaba, y un modelo de Groq que directamente
-     * mandaba su razonamiento interno en inglés como si fuera el mensaje para el cliente. En
-     * vez de eso, se le pregunta al cliente con botones (✅ Guardar en baúl / 💳 Registrar pago)
-     * — es inmediato, siempre correcto, y es exactamente el mismo flujo que ya se
-     * usaba de respaldo cuando no había ningún agente de IA configurado.
+     * Qué hacer con una foto que llega por WhatsApp. No se le pide a ninguna IA que adivine si
+     * es una prenda, un comprobante o una foto de daño (se probó con Gemini y Groq y no fue
+     * confiable). Todo se decide por reglas fijas, en este orden:
      *
-     * La única foto que SÍ se recibe directo sin preguntar nada es la de un reporte de
-     * inconveniente ya en curso — pero eso tampoco depende de que una IA "adivine" nada: el
-     * cliente ya avisó con palabras que tiene un problema (esIntencionInconveniente, que es
-     * determinístico) y esto solo sigue ese flujo ya iniciado.
+     * 1. Si hay un reporte de inconveniente abierto (en cualquier paso), la foto va al reporte.
+     * 2. Si el texto de la foto, o lo último que escribió el cliente antes de mandarla, habla de
+     *    un problema ("no me llegó esta prenda", "llegó rota"...), se abre el reporte con la
+     *    foto — antes esto caía en "Guardar en baúl / Registrar pago" y terminaba como pago.
+     * 3. Si el texto de la foto dice claramente que es un comprobante, se registra el abono.
+     * 4. Si no, se le pregunta al cliente con botones: baúl, pago o problema.
+     *
+     * En ningún caso se pregunta el valor: lo completa el operador desde el panel de Cuentas.
      */
     private void procesarImagenConIA(String from, String mediaId, String mimeType, String caption, String waId) {
-        // El caption que viene junto con la foto (ej. "¿cuánto vale esto?") no pasa por
-        // procesarTextoEntrante, así que esIntencionPrecio nunca se evaluaba para imágenes: se
-        // avisa acá también, sin frenar el procesamiento normal de la foto.
-        if (intentDetector.esIntencionPrecio(caption)) {
+        // Sin caption, procesarWebhook pasa "[image]" como contenido.
+        var textoFoto = caption == null || caption.equals("[image]") ? "" : caption.trim();
+
+        // El caption (ej. "¿cuánto vale esto?") no pasa por procesarTextoEntrante, así que
+        // la intención de precio se revisa acá también, sin frenar el procesamiento de la foto.
+        if (intentDetector.esIntencionPrecio(textoFoto)) {
             log.info("[FOTO] Imagen con caption de intención de precio detectada, escalando a asesor");
             responderEscalarPrecio(from);
         }
 
         var convActiva = stateStore.get(from);
-        // INC_FOTOS: esperando la primera foto. INC_CONFIRMAR: ya llegó al menos una y el
-        // cliente puede seguir mandando más sin tocar el botón "Sí, tengo más" (así escribe la
-        // mayoría).
-        if (convActiva != null && FLUJO_INCONVENIENTE.equals(convActiva.flujo)
-                && (convActiva.paso == INC_FOTOS || convActiva.paso == INC_CONFIRMAR)) {
-            log.info("[FOTO] Imagen en flujo INCONVENIENTE, guardando directamente");
+        if (convActiva != null) {
+            // Mismo vencimiento que procesarTextoEntrante: antes una foto nueva podía quedar
+            // "en cola" detrás de una conversación abandonada hace horas.
+            var ultima = stateStore.getUltimaInteraccion(from);
+            if (ultima == null || ChronoUnit.MINUTES.between(ultima, Instant.now()) >= 30) {
+                log.info("[FOTO] Conversación expirada (>30 min), se descarta antes de procesar la foto");
+                stateStore.remove(from);
+                convActiva = null;
+            }
+        }
+
+        if (convActiva != null && FLUJO_INCONVENIENTE.equals(convActiva.flujo)) {
+            log.info("[FOTO] Imagen en flujo INCONVENIENTE (paso {}), se agrega al reporte", convActiva.paso);
+            if (!textoFoto.isBlank()) agregarADescripcion(convActiva, textoFoto);
+            if (convActiva.paso == INC_DESCRIPCION && (convActiva.descripcion == null || convActiva.descripcion.isBlank())) {
+                // Todavía no sabemos qué pasó: se guarda la foto y se sigue esperando el texto.
+                if (convActiva.fotosInconveniente == null) convActiva.fotosInconveniente = new java.util.ArrayList<>();
+                var path = descargarMediaLocal(mediaId);
+                if (path != null) convActiva.fotosInconveniente.add(path);
+                enviarMensaje(from, path != null
+                    ? "📸 Foto guardada en tu reporte. Ahora cuéntame qué pasó con tu pedido 📝"
+                    : "⚠️ Esa foto no se pudo guardar, ¿puedes enviarla de nuevo? Y cuéntame qué pasó con tu pedido 📝");
+                return;
+            }
             recibirFotoInconveniente(from, convActiva, mediaId, mimeType);
             return;
         }
 
+        var textoProblema = intentDetector.esIntencionInconveniente(textoFoto) ? textoFoto
+                : convActiva == null ? textoPrevioDeInconveniente(from, waId) : null;
+        if (textoProblema != null) {
+            log.info("[FOTO] Foto acompañada de un reporte de problema ('{}'), se abre INCONVENIENTE con la foto", textoProblema);
+            var fotos = new java.util.ArrayList<String>();
+            if (convActiva != null && FLUJO_PEDIDO.equals(convActiva.flujo)) {
+                fotos.addAll(fotosDelPedidoEnCurso(convActiva));
+            }
+            var path = descargarMediaLocal(mediaId);
+            if (path != null) fotos.add(path);
+            stateStore.remove(from);
+            iniciarInconvenienteConFotos(from, textoProblema, fotos);
+            return;
+        }
+
+        if (intentDetector.esIntencionComprobantePago(textoFoto)) {
+            // No toca el estado de la conversación: si el cliente estaba en otro flujo (ej. dando
+            // sus datos de envío), puede seguir donde iba.
+            log.info("[FOTO] Caption de comprobante de pago, se registra el abono sin preguntar");
+            var resp = cuentaService.registrarAbonoDesdeBot(from, null, mediaId, descargarMediaLocal(mediaId), mimeType);
+            confirmarAbonoFoto(from, resp.id(), waId);
+            return;
+        }
+
         iniciarFlujoPedidoFoto(from, mediaId, mimeType, waId);
+    }
+
+    /**
+     * Si el mensaje entrante inmediatamente anterior a esta foto fue un texto reciente
+     * reportando un problema, devuelve ese texto. Cubre el caso "Hola, no me llegó esta prenda"
+     * + foto cuando el texto no alcanzó a abrir el reporte (ej. era el primer mensaje del
+     * número, que solo recibe el saludo de bienvenida).
+     */
+    private String textoPrevioDeInconveniente(String from, String waIdFoto) {
+        try {
+            var previo = mensajeRepo.findTop3ByWhatsappFromAndDireccionOrderByCreatedAtDesc(from, "ENTRADA").stream()
+                    .filter(m -> !waIdFoto.equals(m.getWaMessageId()))
+                    .findFirst()
+                    .orElse(null);
+            if (previo == null || !"text".equals(previo.getTipo()) || previo.getCreatedAt() == null) return null;
+            if (ChronoUnit.MINUTES.between(previo.getCreatedAt(), Instant.now()) > MINUTOS_CONTEXTO_FOTO) return null;
+            return intentDetector.esIntencionInconveniente(previo.getContenido()) ? previo.getContenido() : null;
+        } catch (Exception e) {
+            log.warn("[FOTO] No se pudo revisar el texto previo a la foto de {}: {}", from, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Fotos de un flujo PEDIDO que todavía no se clasificaron (la que espera botón + las que
+     * están en cola), descargadas a disco para poder pasarlas a un reporte de inconveniente.
+     */
+    private List<String> fotosDelPedidoEnCurso(ConversacionCliente conv) {
+        var fotos = new java.util.ArrayList<String>();
+        if (conv.paso == PEDIDO_CONFIRMAR_FOTO && conv.mediaId != null) {
+            var path = conv.mediaPath != null ? conv.mediaPath : descargarMediaLocal(conv.mediaId);
+            if (path != null) fotos.add(path);
+        }
+        if (conv.prendasPendientes != null) {
+            for (var p : conv.prendasPendientes) {
+                if (p.mediaId == null) continue;
+                var path = descargarMediaLocal(p.mediaId);
+                if (path != null) fotos.add(path);
+            }
+        }
+        return fotos;
+    }
+
+    /**
+     * Abre un reporte de inconveniente que ya trae fotos. Si ya sabemos qué pasó (descripción),
+     * solo se pregunta si hay más fotos; si no, se pide que cuente qué pasó.
+     */
+    private void iniciarInconvenienteConFotos(String from, String descripcion, List<String> fotos) {
+        if (fotos.isEmpty()) {
+            iniciarFlujoInconveniente(from, descripcion);
+            return;
+        }
+        var conv = new ConversacionCliente();
+        conv.flujo = FLUJO_INCONVENIENTE;
+        conv.descripcion = descripcion != null ? descripcion : "";
+        conv.fotosInconveniente = new java.util.ArrayList<>(fotos);
+        stateStore.put(from, conv);
+        var queFotos = fotos.size() == 1 ? "la foto" : "las " + fotos.size() + " fotos";
+        if (conv.descripcion.isBlank()) {
+            conv.paso = INC_DESCRIPCION;
+            enviarMensaje(from, """
+                Lamento mucho eso 😔 Ya guardé %s en tu reporte.
+
+                Cuéntame qué pasó con tu pedido, por ejemplo: "no me llegó esta prenda" o "llegó con una mancha". 📝"""
+                .formatted(queFotos));
+        } else {
+            conv.paso = INC_CONFIRMAR;
+            enviarBotones(from, "Lamento mucho eso 😔 Ya abrí tu reporte con %s. ¿Tienes más fotos del problema?".formatted(queFotos),
+                List.of(
+                    Map.of("id", "inconveniente_mas_fotos", "title", "📸 Sí, tengo más"),
+                    Map.of("id", "inconveniente_listo", "title", "✅ Listo, guardar")
+                ));
+        }
+        log.info("Iniciado flujo inconveniente para {} con {} foto(s) y descripción: {}", from, fotos.size(), descripcion);
+    }
+
+    private static void agregarADescripcion(ConversacionCliente conv, String texto) {
+        if (texto == null || texto.isBlank()) return;
+        conv.descripcion = conv.descripcion == null || conv.descripcion.isBlank()
+                ? texto.trim()
+                : conv.descripcion + "\n" + texto.trim();
     }
 
     private void procesarAudioConIA(String from, String mediaId, String mimeType) {
@@ -1160,6 +1342,22 @@ public class WhatsAppServiceImpl implements WhatsAppService {
 
     private void iniciarFlujoPedidoFoto(String from, String mediaId, String mimeType, String waId) {
         var convExistente = stateStore.get(from);
+        if (convExistente != null && FLUJO_PEDIDO.equals(convExistente.flujo)
+                && convExistente.paso != PEDIDO_CONFIRMAR_FOTO && convExistente.paso != PEDIDO_VALOR_TEXTO) {
+            // La prenda anterior ya quedó registrada (se le preguntaba por el envío) o todavía
+            // no había ninguna: se pregunta por esta foto en la misma conversación. Antes se
+            // encolaba también en este caso, y como en ese paso nadie saca prendas de la cola,
+            // la foto se perdía al tocar "Solo apartar".
+            convExistente.paso = PEDIDO_CONFIRMAR_FOTO;
+            convExistente.mediaId = mediaId;
+            convExistente.mimeType = mimeType;
+            convExistente.mediaPath = null;
+            convExistente.concepto = null;
+            convExistente.soportePago = false;
+            convExistente.fotoWaMessageId = waId;
+            enviarBotonesFoto(from, "📸 Recibí tu foto. ¿Qué hacemos con ella?", null);
+            return;
+        }
         if (convExistente != null && FLUJO_PEDIDO.equals(convExistente.flujo)) {
             // Ya hay una prenda en proceso (esperando botón o precio): esta foto se encola en
             // vez de reemplazar la conversación, para no perder lo que ya se venía registrando
@@ -1183,13 +1381,23 @@ public class WhatsAppServiceImpl implements WhatsAppService {
         conv.paso = PEDIDO_CONFIRMAR_FOTO;
         conv.mediaId = mediaId;
         conv.mimeType = mimeType;
+        conv.fotoWaMessageId = waId;
         stateStore.put(from, conv);
-        enviarBotones(from, """
-            📸 Recibí tu foto. ¿Qué quieres hacer?""",
+        enviarBotonesFoto(from, "📸 Recibí tu foto. ¿Qué hacemos con ella?", null);
+    }
+
+    /**
+     * La pregunta estándar sobre una foto. Los ids "si_foto" y "soporte_pago" se mantienen
+     * para que sigan funcionando los botones que ya se mandaron antes de este cambio.
+     */
+    private void enviarBotonesFoto(String from, String texto, String citarWaMessageId) {
+        enviarBotones(from, texto,
             List.of(
-                Map.of("id", "si_foto",       "title", "✅ Guardar en baúl"),
-                Map.of("id", "soporte_pago",  "title", "💳 Registrar pago")
-            ));
+                Map.of("id", "si_foto",       "title", "🛍️ Guardar en baúl"),
+                Map.of("id", "soporte_pago",  "title", "💳 Es un pago"),
+                Map.of("id", "foto_problema", "title", "⚠️ Tengo un problema")
+            ),
+            citarWaMessageId);
     }
 
     private void iniciarFlujoPedidoTexto(String from) {
@@ -1326,11 +1534,23 @@ public class WhatsAppServiceImpl implements WhatsAppService {
 
     private void procesarTextoInconveniente(String from, ConversacionCliente conv, String contenido) {
         if (conv.paso == INC_DESCRIPCION) {
-            conv.descripcion = contenido;
-            conv.paso = INC_FOTOS;
-            enviarMensaje(from, """
-                Gracias por la información. Ahora por favor envíame las fotos del problema \
-                (prenda dañada, faltante, etc.). 📷""");
+            // Se agrega (no se reemplaza) para no perder el primer mensaje que abrió el reporte.
+            agregarADescripcion(conv, contenido);
+            if (conv.fotosInconveniente != null && !conv.fotosInconveniente.isEmpty()) {
+                // Las fotos ya llegaron antes (ej. tocó "⚠️ Tengo un problema" sobre una foto):
+                // no se le vuelven a pedir.
+                conv.paso = INC_CONFIRMAR;
+                enviarBotones(from, "✍️ Gracias, ya quedó en tu reporte. ¿Tienes más fotos del problema o ya está listo?",
+                    List.of(
+                        Map.of("id", "inconveniente_mas_fotos", "title", "📸 Sí, tengo más"),
+                        Map.of("id", "inconveniente_listo", "title", "✅ Listo, guardar")
+                    ));
+            } else {
+                conv.paso = INC_FOTOS;
+                enviarMensaje(from, """
+                    Gracias por la información. Ahora por favor envíame las fotos del problema \
+                    (prenda dañada, faltante, etc.). 📷""");
+            }
         }
         log.info("Flujo inconveniente [{}] paso {}: {}", from, conv.paso, contenido);
     }
@@ -1396,7 +1616,17 @@ public class WhatsAppServiceImpl implements WhatsAppService {
                 conv.mediaId, conv.mediaPath, conv.mimeType);
         var concepto = resp.concepto() == null || resp.concepto().isBlank()
                 ? "la prenda" : "\"" + resp.concepto() + "\"";
-        if (valor == null) {
+        if (conv.mediaId != null) {
+            // Viene de una foto: ya no se pregunta el valor (lo pone el operador en Cuentas) y se
+            // ofrece deshacer por si el cliente tocó la opción equivocada.
+            // (valor != null solo en conversaciones que quedaron a mitad del flujo viejo).
+            var texto = valor == null
+                    ? "✅ ¡Listo! Guardé %s en tu baúl 🛍️".formatted(concepto)
+                    : "✅ ¡Listo! Guardé %s en tu baúl por $%d 🛍️".formatted(concepto, valor);
+            enviarBotones(from, texto,
+                List.of(Map.of("id", "deshacer_" + resp.id(), "title", "↩️ Me equivoqué")),
+                conv.fotoWaMessageId);
+        } else if (valor == null) {
             enviarMensaje(from, "✅ Listo, apartamos %s sin precio (queda por definir). Cuando tengamos el valor te avisamos."
                     .formatted(concepto));
         } else {
@@ -1423,16 +1653,94 @@ public class WhatsAppServiceImpl implements WhatsAppService {
         if (conv.mediaPath == null && conv.mediaId != null) {
             conv.mediaPath = descargarMediaLocal(conv.mediaId);
         }
-        cuentaService.registrarAbonoDesdeBot(from, valor, conv.mediaId, conv.mediaPath, conv.mimeType);
+        var resp = cuentaService.registrarAbonoDesdeBot(from, valor, conv.mediaId, conv.mediaPath, conv.mimeType);
         if (valor != null) {
+            // Solo llega acá una conversación que quedó a mitad del flujo viejo (cuando todavía
+            // se preguntaba "¿Cuánto pagaste?") antes de desplegar este cambio.
             enviarMensaje(from, "💳 ¡Listo! Registramos tu soporte de pago por $%d. La foto quedó en tu cuenta y la revisaremos para confirmarla. 💜"
                     .formatted(valor));
         } else {
-            enviarMensaje(from, "💳 ¡Listo! Registramos tu comprobante de pago. La foto quedó en tu cuenta y la revisaremos para confirmarla. 💜");
+            confirmarAbonoFoto(from, resp.id(), conv.fotoWaMessageId);
         }
         if (!avanzarSiguientePrendaPendiente(from, conv)) {
             stateStore.remove(from);
         }
+    }
+
+    private void confirmarAbonoFoto(String from, UUID movimientoId, String citarWaMessageId) {
+        enviarBotones(from, "💳 ¡Recibido! Guardé tu comprobante de pago. Nuestro equipo lo revisa y te confirma el abono. 💜",
+            List.of(Map.of("id", "deshacer_" + movimientoId, "title", "↩️ Me equivoqué")),
+            citarWaMessageId);
+    }
+
+    /**
+     * Botón "↩️ Me equivoqué" tras guardar una foto en el baúl o como pago: borra ese registro
+     * (si el operador todavía no lo revisó) y vuelve a preguntar qué hacer con la foto. Si en
+     * este momento hay un reporte de inconveniente abierto, la foto pasa a ese reporte — es el
+     * caso de quien registró como pago la foto de una prenda que no le llegó.
+     */
+    private void deshacerRegistroFoto(String from, String movimientoIdTexto) {
+        UUID movimientoId;
+        try {
+            movimientoId = UUID.fromString(movimientoIdTexto);
+        } catch (IllegalArgumentException e) {
+            log.warn("[DESHACER] Id de movimiento inválido en botón de {}: {}", from, movimientoIdTexto);
+            return;
+        }
+
+        var anulado = cuentaService.anularDesdeBot(movimientoId, from).orElse(null);
+        if (anulado == null) {
+            clienteRepo.findByWhatsapp(from).ifPresent(c -> {
+                c.setRequiereAsesor(true);
+                clienteRepo.save(c);
+            });
+            enviarMensaje(from, "Ese registro ya no lo puedo cambiar desde acá (puede que nuestro equipo ya lo haya revisado). Un asesor te ayuda a corregirlo en breve 💜");
+            return;
+        }
+        log.info("[DESHACER] {} anuló su {} {}", from, anulado.tipo(), movimientoId);
+
+        if (anulado.mediaId() == null) {
+            enviarMensaje(from, "↩️ Listo, borré ese registro.");
+            return;
+        }
+        var fotoWaMessageId = mensajeRepo.findFirstByMediaId(anulado.mediaId())
+                .map(WaMensaje::getWaMessageId).orElse(null);
+
+        var conv = stateStore.get(from);
+        if (conv != null && FLUJO_INCONVENIENTE.equals(conv.flujo)) {
+            if (conv.fotosInconveniente == null) conv.fotosInconveniente = new java.util.ArrayList<>();
+            var path = anulado.mediaPath() != null ? anulado.mediaPath() : descargarMediaLocal(anulado.mediaId());
+            if (path != null) conv.fotosInconveniente.add(path);
+            enviarMensaje(from, "↩️ Listo, borré ese registro y agregué la foto a tu reporte.");
+            return;
+        }
+        if (conv != null && FLUJO_PEDIDO.equals(conv.flujo)
+                && (conv.paso == PEDIDO_CONFIRMAR_FOTO || conv.paso == PEDIDO_VALOR_TEXTO)) {
+            // Se está preguntando por otra foto en este momento: esta vuelve a la cola, primera.
+            if (conv.prendasPendientes == null) conv.prendasPendientes = new java.util.ArrayList<>();
+            var pendiente = new PrendaPendiente();
+            pendiente.mediaId = anulado.mediaId();
+            pendiente.mimeType = anulado.mimeType();
+            pendiente.waMessageId = fotoWaMessageId;
+            conv.prendasPendientes.add(0, pendiente);
+            enviarMensaje(from, "↩️ Listo, borré ese registro. Apenas terminemos con la foto actual te vuelvo a preguntar por esa.");
+            return;
+        }
+        if (conv == null || !FLUJO_PEDIDO.equals(conv.flujo)) {
+            // Sin flujo activo (o uno que no es de fotos, ej. datos de envío): se arranca uno
+            // nuevo solo para esta foto.
+            conv = new ConversacionCliente();
+            conv.flujo = FLUJO_PEDIDO;
+            stateStore.put(from, conv);
+        }
+        conv.paso = PEDIDO_CONFIRMAR_FOTO;
+        conv.mediaId = anulado.mediaId();
+        conv.mimeType = anulado.mimeType();
+        conv.mediaPath = anulado.mediaPath();
+        conv.concepto = null;
+        conv.soportePago = false;
+        conv.fotoWaMessageId = fotoWaMessageId;
+        enviarBotonesFoto(from, "↩️ Listo, borré ese registro. Entonces, ¿qué hacemos con esta foto?", fotoWaMessageId);
     }
 
     private String descargarMediaLocal(String mediaId) {

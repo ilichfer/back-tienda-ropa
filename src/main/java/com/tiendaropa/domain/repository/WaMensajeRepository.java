@@ -22,6 +22,13 @@ public interface WaMensajeRepository extends JpaRepository<WaMensaje, UUID> {
 
     Optional<WaMensaje> findFirstByWhatsappFromAndDireccionOrderByCreatedAtDesc(String whatsappFrom, String direccion);
 
+    // Los últimos mensajes entrantes de un número, para mirar qué escribió el cliente justo
+    // antes de una foto (ej. "no me llegó esta prenda" y luego la foto).
+    List<WaMensaje> findTop3ByWhatsappFromAndDireccionOrderByCreatedAtDesc(String whatsappFrom, String direccion);
+
+    // La foto original de un cargo/abono (por su media id de Meta), para volver a citarla.
+    Optional<WaMensaje> findFirstByMediaId(String mediaId);
+
     // Para actualizar el estado de entrega (sent/delivered/read/failed) que llega por el
     // webhook de "statuses" de Meta, referenciando el mensaje saliente por su wa_message_id.
     Optional<WaMensaje> findByWaMessageId(String waMessageId);

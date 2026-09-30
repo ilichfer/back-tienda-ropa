@@ -25,4 +25,8 @@ public class ConversacionCliente {
     public String descripcion;
     public List<String> fotosInconveniente;
     public List<PrendaPendiente> prendasPendientes;
+
+    // wa_message_id de la foto por la que se está preguntando ahora (flujo PEDIDO), para citarla
+    // en las respuestas cuando el cliente mandó varias fotos seguidas.
+    public String fotoWaMessageId;
 }
