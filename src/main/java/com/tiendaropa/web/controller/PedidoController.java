@@ -1,15 +1,17 @@
 package com.tiendaropa.web.controller;
 
-import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tiendaropa.domain.model.enums.EstadoPedido;
 import com.tiendaropa.domain.service.PedidoService;
 import com.tiendaropa.domain.service.WhatsAppService;
+import com.tiendaropa.domain.service.whatsapp.FirmaWebhookMeta;
 import com.tiendaropa.web.dto.request.CambiarEstadoRequest;
 import com.tiendaropa.web.dto.request.PedidoRequest;
 import com.tiendaropa.web.dto.response.PedidoResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -21,10 +23,14 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api")
 @RequiredArgsConstructor
+@Slf4j
 public class PedidoController {
+
+    private static final ObjectMapper JSON = new ObjectMapper();
 
     private final PedidoService   pedidoService;
     private final WhatsAppService whatsAppService;
+    private final FirmaWebhookMeta firmaWebhook;
 
     @Value("${whatsapp.verify-token}")
     private String verifyToken;
@@ -83,9 +89,17 @@ public class PedidoController {
         return ResponseEntity.status(403).body("Forbidden");
     }
 
+    // Se recibe el cuerpo crudo (bytes) porque la firma de Meta se calcula sobre el cuerpo
+    // exacto: si se dejara que Spring lo convierta a JSON primero, ya no se podría verificar.
     @PostMapping("/webhook/whatsapp")
-    public ResponseEntity<String> recibirWebhook(@RequestBody JsonNode payload) {
-        whatsAppService.procesarWebhook(payload);
+    public ResponseEntity<String> recibirWebhook(
+            @RequestBody byte[] cuerpo,
+            @RequestHeader(value = "X-Hub-Signature-256", required = false) String firma) throws java.io.IOException {
+        if (!firmaWebhook.esValida(cuerpo, firma)) {
+            log.warn("[WEBHOOK] Webhook rechazado: firma inválida o ausente ({} bytes)", cuerpo.length);
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Firma inválida");
+        }
+        whatsAppService.procesarWebhook(JSON.readTree(cuerpo));
         return ResponseEntity.ok("EVENT_RECEIVED");
     }
 }

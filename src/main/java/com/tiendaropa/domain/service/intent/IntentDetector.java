@@ -282,6 +282,16 @@ public class IntentDetector {
                 || t.contains("no quiero bot") || t.contains("atención humana") || t.contains("atencion humana");
     }
 
+    // Darse de baja de los avisos de lives (ver el botón "🔔 Sí, avisarme").
+    public boolean esCancelarAvisosLive(String contenido) {
+        if (contenido == null) return false;
+        var t = contenido.toLowerCase();
+        return t.contains("no más avisos") || t.contains("no mas avisos")
+                || t.contains("no quiero avisos") || t.contains("no quiero más avisos") || t.contains("no quiero mas avisos")
+                || t.contains("cancelar avisos") || t.contains("quitar avisos")
+                || t.contains("no me avisen") || t.contains("dejen de avisarme");
+    }
+
     public boolean esNoSe(String contenido) {
         if (contenido == null) return false;
         var t = contenido.toLowerCase().trim();

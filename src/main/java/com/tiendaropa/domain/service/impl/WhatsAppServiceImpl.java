@@ -2,6 +2,7 @@ package com.tiendaropa.domain.service.impl;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.tiendaropa.domain.model.Cliente;
+import com.tiendaropa.domain.model.SolicitudEnvio;
 import com.tiendaropa.domain.model.WaMensaje;
 import com.tiendaropa.domain.repository.ClienteRepository;
 import com.tiendaropa.domain.repository.CuentaRepository;
@@ -11,6 +12,7 @@ import com.tiendaropa.domain.repository.SolicitudEnvioRepository;
 import com.tiendaropa.domain.repository.WaMensajeRepository;
 import com.tiendaropa.domain.service.CoexistenciaService;
 import com.tiendaropa.domain.service.CuentaService;
+import com.tiendaropa.domain.service.HorarioAtencion;
 import com.tiendaropa.domain.service.EnvioService;
 import com.tiendaropa.domain.service.InconvenienteService;
 import com.tiendaropa.domain.service.WhatsAppService;
@@ -74,6 +76,7 @@ public class WhatsAppServiceImpl implements WhatsAppService {
     private final IntentDetector intentDetector;
     private final ConversationStateStore stateStore;
     private final CoexistenciaService coexistencia;
+    private final HorarioAtencion horario;
 
     @jakarta.annotation.PostConstruct
     public void init() {
@@ -269,6 +272,12 @@ public class WhatsAppServiceImpl implements WhatsAppService {
                         return;
                     }
 
+                    if (tipo.equals("text") && intentDetector.esCancelarAvisosLive(contenido)) {
+                        cambiarAvisosLive(from, false);
+                        enviarMensaje(from, "Listo, ya no te enviaremos avisos de lives.");
+                        return;
+                    }
+
                     if (tipo.startsWith("button_")) {
                         log.info("[FLUJO] Botón detectado, procesando...");
                         procesarBoton(from, tipo, contenido, cliente);
@@ -305,12 +314,10 @@ public class WhatsAppServiceImpl implements WhatsAppService {
 
                         if (primerMensaje) {
                             enviarMensaje(from, """
-                                ¡Hola! 👋 Bienvenido/a al Patio de Ropa Jireh 🛍️💜
+                                ¡Hola! Bienvenido/a a Patio de Ropa Jireh 💜
+                                ¿Me compartes tu nombre y tu usuario de TikTok?
 
-                                Para poder atenderte mejor, por favor me regalas tu usuario de TikTok y tu nombre completo 😊
-
-                                Y no te vayas a perder nuestros lives: únete a nuestro grupo de WhatsApp, ahí avisamos el día y la hora de cada uno 👇
-                                %s""".formatted(LINK_GRUPO_WHATSAPP));
+                                Avisamos los lives en nuestro grupo: %s""".formatted(LINK_GRUPO_WHATSAPP));
                         }
                     }
                 } finally {
@@ -399,7 +406,10 @@ public class WhatsAppServiceImpl implements WhatsAppService {
         // Si el número es nuevo, sus mensajes se guardaron sin cliente y el panel no vería que
         // el bot quedó silenciado.
         mensajeRepo.vincularCliente(cliente, from);
-        enviarMensaje(from, "💬 Te comunico con un asesor. En breve una persona de nuestro equipo te atiende por este mismo chat 💜");
+        enviarMensaje(from, horario.estaAbierto()
+                ? "💬 Te comunico con un asesor. En breve una persona del equipo te atiende por este chat."
+                : "💬 Te comunico con un asesor. Atendemos de %s, así que te escribimos %s."
+                        .formatted(horario.descripcion(), horario.cuandoTeAtendemos()));
         log.info("[ASESOR] {} pidió hablar con un asesor: bot silenciado hasta que lo reactiven desde el panel", from);
     }
 
@@ -447,6 +457,20 @@ public class WhatsAppServiceImpl implements WhatsAppService {
         }
         switch (tipo) {
             case "button_envio" -> iniciarFlujoEnvio(from);
+            case "button_resumen_ok" -> enviarMensaje(from,
+                    "Perfecto ✅ Tu pedido sale el próximo día de despacho (martes o viernes). Te avisamos con la guía.");
+            case "button_resumen_revisar" -> {
+                clienteRepo.findByWhatsapp(from).ifPresent(c -> {
+                    c.setRequiereAsesor(true);
+                    clienteRepo.save(c);
+                });
+                enviarMensaje(from, "Un asesor revisa tu pedido antes de enviarlo y te escribe " + horario.cuandoTeAtendemos() + ".");
+            }
+            case "button_lives_si" -> {
+                cambiarAvisosLive(from, true);
+                enviarMensaje(from, "Listo 🔔 Te avisamos por aquí cuando haya live. Si ya no quieres avisos, escribe *no más avisos*.");
+            }
+            case "button_lives_no" -> enviarMensaje(from, "Perfecto, no te enviaremos avisos de lives.");
             case "button_apartar" -> {
                 stateStore.remove(from);
                 iniciarFlujoPedidoTexto(from);
@@ -523,9 +547,8 @@ public class WhatsAppServiceImpl implements WhatsAppService {
                         envioService.crearConDatos(from, conv.nombre, conv.telefono, conv.cedula,
                             conv.direccion, conv.ciudad, conv.barrio);
                         stateStore.remove(from);
-                        enviarMensaje(from, """
-                            ✅ ¡Gracias! Hemos recibido tus datos de envío.
-                            En breve te contactaremos para coordinar la entrega.""");
+                        enviarMensaje(from, "✅ Recibimos tus datos de envío.");
+                        enviarResumenPedido(from);
                         log.info("Flujo envío [{}] confirmado y creado", from);
                     } catch (Exception e) {
                         log.error("[ENVIO] No se pudo guardar la solicitud de envío de {}: {}", from, e.getMessage(), e);
@@ -541,7 +564,7 @@ public class WhatsAppServiceImpl implements WhatsAppService {
                     log.warn("[ENVIO] Botón 'Confirmar' de {} llegó sin el estado esperado (conv={}, flujo={}, paso={}) — no se guardó nada, se reinicia el flujo",
                         from, conv != null, conv == null ? null : conv.flujo, conv == null ? null : conv.paso);
                     enviarMensaje(from, """
-                        Parece que pasó un momento desde que empezamos con tus datos de envío. Vamos a tomarlos de nuevo para asegurarnos de que todo quede bien. 🙏""");
+                        Pasó un rato desde que empezamos con tus datos de envío. Tomémoslos de nuevo.""");
                     iniciarFlujoEnvio(from);
                 }
             }
@@ -847,7 +870,7 @@ public class WhatsAppServiceImpl implements WhatsAppService {
             var ultimoAviso = stateStore.getUltimoAvisoAsesor(from);
             var avisar = ultimoAviso == null || ChronoUnit.MINUTES.between(ultimoAviso, Instant.now()) >= 30;
             if (avisar) {
-                enviarMensaje(from, "💜 Ya un asesor está al tanto de tu caso y te va a atender personalmente en breve. Gracias por tu paciencia.");
+                enviarMensaje(from, "Un asesor ya tiene tu caso y te atiende " + horario.cuandoTeAtendemos() + ". Gracias por esperar 💜");
                 stateStore.marcarAvisoAsesor(from);
             }
             log.info("[IA] {} ya requiere asesor humano, el bot no responde libremente (aviso enviado={})", from, avisar);
@@ -1257,17 +1280,16 @@ public class WhatsAppServiceImpl implements WhatsAppService {
 
             stateStore.remove(from);
             enviarMensaje(from, """
-                ✅ ¡Gracias! Hemos recibido tus datos de envío:
+                ✅ Recibimos tus datos de envío:
                 • Nombre: %s
                 • Teléfono: %s
                 • Cédula: %s
                 • Dirección: %s
                 • Ciudad: %s
-                • Barrio: %s
-
-                En breve te contactaremos para coordinar la entrega.""".formatted(
+                • Barrio: %s""".formatted(
                 datos.getNombreCompleto(), datos.getTelefono(), datos.getCedula(),
                 datos.getDireccion(), datos.getCiudad(), datos.getBarrio()));
+            enviarResumenPedido(from);
             log.info("Flujo envío [{}] completado en un solo mensaje", from);
             return;
         }
@@ -1276,27 +1298,27 @@ public class WhatsAppServiceImpl implements WhatsAppService {
             case 0 -> {
                 conv.nombre = contenido;
                 conv.paso = 1;
-                enviarMensaje(from, "Gracias. ¿Cuál es tu número de teléfono? 📞");
+                enviarMensaje(from, "¿Tu teléfono?");
             }
             case 1 -> {
                 conv.telefono = contenido;
                 conv.paso = 2;
-                enviarMensaje(from, "Perfecto. ¿Cuál es tu número de cédula? 🪪");
+                enviarMensaje(from, "¿Tu número de cédula?");
             }
             case 2 -> {
                 conv.cedula = contenido;
                 conv.paso = 3;
-                enviarMensaje(from, "¿Cuál es tu dirección? 📍");
+                enviarMensaje(from, "¿Tu dirección?");
             }
             case 3 -> {
                 conv.direccion = contenido;
                 conv.paso = 4;
-                enviarMensaje(from, "¿En qué ciudad te encuentras? 🏙️");
+                enviarMensaje(from, "¿Ciudad?");
             }
             case 4 -> {
                 conv.ciudad = contenido;
                 conv.paso = 5;
-                enviarMensaje(from, "¿Cuál es tu barrio? 🏘️");
+                enviarMensaje(from, "¿Barrio?");
             }
             case 5 -> {
                 conv.barrio = contenido;
@@ -1313,7 +1335,7 @@ public class WhatsAppServiceImpl implements WhatsAppService {
 
     private void pedirConfirmacionEnvio(String from, ConversacionCliente conv) {
         enviarBotones(from, """
-            Por favor confirma que tus datos estén correctos antes de enviarlos:
+            ¿Están bien tus datos?
 
             • Nombre: %s
             • Teléfono: %s
@@ -1335,7 +1357,7 @@ public class WhatsAppServiceImpl implements WhatsAppService {
             c.setRequiereAsesor(true);
             clienteRepo.save(c);
         });
-        enviarMensaje(from, "💜 El precio exacto te lo confirma un asesor en un momento. ¿Hay algo más en lo que te pueda ayudar mientras tanto?");
+        enviarMensaje(from, "El precio te lo confirma un asesor " + horario.cuandoTeAtendemos() + " 💜");
     }
 
     // Único lugar donde vive el número de pago: si algún día cambia, se edita solo acá.
@@ -1343,8 +1365,8 @@ public class WhatsAppServiceImpl implements WhatsAppService {
 
     private void responderComoPagar(String from) {
         enviarMensaje(from, """
-            💳 Los pagos los recibimos por *Nequi* o *Daviplata* al número *%s*.
-            Cuando hagas la transferencia, envíanos la foto del comprobante para confirmarlo. 💜""".formatted(NUMERO_PAGO));
+            Pagas por *Nequi* o *Daviplata* al *%s*.
+            Luego envíanos la foto del comprobante 💜""".formatted(NUMERO_PAGO));
         log.info("[PAGO] Cliente {} consultó cómo/dónde pagar, se dio el número de Nequi/Daviplata", from);
     }
 
@@ -1358,11 +1380,78 @@ public class WhatsAppServiceImpl implements WhatsAppService {
     // se una al grupo de WhatsApp, que es donde se avisa el día y la hora de cada live.
     private void responderHorarioLive(String from) {
         enviarMensaje(from, """
-            🎥 ¡Estate pendiente a nuestras publicaciones! Ahí anunciamos cuándo va a ser el próximo live.
-
-            El día y la hora exacta los avisamos en nuestro grupo de WhatsApp, únete acá 👇
+            El día y la hora de cada live los avisamos en nuestro grupo:
             %s""".formatted(LINK_GRUPO_WHATSAPP));
+        var cliente = clienteRepo.findByWhatsapp(from).orElse(null);
+        if (cliente == null || !Boolean.TRUE.equals(cliente.getAvisosLive())) {
+            // El link del grupo va en un mensaje aparte: en un mensaje con botones no queda clicable.
+            enviarBotones(from, "¿Quieres que te avisemos por aquí cuando haya live?",
+                List.of(
+                    Map.of("id", "lives_si", "title", "🔔 Sí, avisarme"),
+                    Map.of("id", "lives_no", "title", "No, gracias")
+                ));
+        }
         log.info("[LIVE] Cliente {} preguntó por el horario del live, se invitó al grupo de WhatsApp", from);
+    }
+
+    // Formato colombiano fijo ($45.000): con %,d dependía del idioma del servidor y en el
+    // contenedor salía $45,000.
+    private static String pesos(long valor) {
+        return "$" + java.text.NumberFormat.getIntegerInstance(java.util.Locale.forLanguageTag("es-CO")).format(valor);
+    }
+
+    private void cambiarAvisosLive(String from, boolean activar) {
+        var cliente = clienteRepo.findByWhatsapp(from)
+                .orElseGet(() -> clienteRepo.save(Cliente.builder().whatsapp(from).build()));
+        cliente.setAvisosLive(activar);
+        clienteRepo.save(cliente);
+        log.info("[LIVE] {} {} los avisos de lives", from, activar ? "activó" : "desactivó");
+    }
+
+    /**
+     * Antes de despachar, le muestra al cliente qué prendas van en su pedido y cuánto debe, para
+     * que avise si falta algo ANTES de que salga (y no con un reclamo cuando ya le llegó).
+     * Las prendas son los cargos desde su último envío despachado; el saldo es el total de su
+     * cuenta. Si no tiene cuenta o no hay prendas nuevas, no manda nada.
+     */
+    private void enviarResumenPedido(String from) {
+        try {
+            var cuenta = cuentaRepo.findByCliente_Whatsapp(from).orElse(null);
+            if (cuenta == null) return;
+            var desde = solicitudRepo.findFirstByWhatsappAndEstadoOrderByCreatedAtDesc(from, "ENVIADO")
+                    .map(SolicitudEnvio::getCreatedAt).orElse(Instant.EPOCH);
+            var prendas = cuentaMovimientoRepo.findByCuentaIdOrderByCreatedAtDesc(cuenta.getId()).stream()
+                    .filter(m -> "CARGO".equals(m.getTipo()))
+                    .filter(m -> m.getCreatedAt() == null || m.getCreatedAt().isAfter(desde))
+                    .toList();
+            if (prendas.isEmpty()) return;
+
+            var lineas = new StringBuilder();
+            for (var m : prendas.reversed()) {
+                var concepto = m.getConcepto() == null || m.getConcepto().isBlank() ? "Prenda" : m.getConcepto();
+                lineas.append("• ").append(concepto).append(" — ")
+                        .append(m.getValor() == null ? "valor por confirmar" : pesos(m.getValor()))
+                        .append('\n');
+            }
+            var cargos = cuentaMovimientoRepo.sumCargos(cuenta.getId());
+            var abonos = cuentaMovimientoRepo.sumAbonos(cuenta.getId());
+            long saldo = (cargos != null ? cargos : 0L) - (abonos != null ? abonos : 0L);
+            var porValidar = cuentaMovimientoRepo.countAbonosPorValidar(cuenta.getId());
+
+            var texto = new StringBuilder("📋 *Resumen de tu pedido*\n").append(lineas)
+                    .append("\nSaldo pendiente: *" + pesos(Math.max(saldo, 0)) + "*");
+            if (porValidar > 0) texto.append("\n(Tienes %d pago(s) en revisión)".formatted(porValidar));
+            texto.append("\n\n¿Está todo bien?");
+
+            enviarBotones(from, texto.toString(),
+                List.of(
+                    Map.of("id", "resumen_ok", "title", "✅ Todo bien"),
+                    Map.of("id", "resumen_revisar", "title", "❓ Algo no cuadra")
+                ));
+        } catch (Exception e) {
+            // El resumen es una ayuda: si falla, los datos de envío ya quedaron guardados.
+            log.warn("[ENVIO] No se pudo armar el resumen del pedido de {}: {}", from, e.getMessage());
+        }
     }
 
     // Único lugar donde viven los días de despacho: si algún día cambian, se edita solo acá.
@@ -1371,7 +1460,7 @@ public class WhatsAppServiceImpl implements WhatsAppService {
     // "martes y viernes desde Bogotá" y el "desde Bogotá" era inventado).
     private void responderHorarioEnvios(String from) {
         enviarMensaje(from, """
-            📦 Los envíos se despachan los *martes y viernes*. No manejamos una hora fija, así que en cuanto salga tu pedido te avisamos. 💜""");
+            Despachamos los *martes y viernes*. Te avisamos cuando salga tu pedido 📦""");
         log.info("[ENVIO] Cliente {} preguntó por el horario general de despacho, se respondió con los días fijos", from);
     }
 
@@ -1408,16 +1497,14 @@ public class WhatsAppServiceImpl implements WhatsAppService {
             long saldo = (cargos != null ? cargos : 0L) - (abonos != null ? abonos : 0L);
 
             if (saldo > 0) {
-                enviarMensaje(from, String.format(
-                    "💰 Tu saldo pendiente es de *$%,d*. Un asesor revisará tu cuenta y te confirmará los detalles. ¿Deseas realizar un abono? 💜", saldo));
+                enviarMensaje(from, "Tu saldo pendiente es *" + pesos(saldo) + "*. Un asesor lo revisa y te confirma.");
             } else if (saldo < 0) {
-                enviarMensaje(from, String.format(
-                    "💰 Tu cuenta muestra un saldo a favor de *$%,d*. Un asesor revisará y te confirmará. 💜", Math.abs(saldo)));
+                enviarMensaje(from, "Tienes un saldo a favor de *" + pesos(Math.abs(saldo)) + "*. Un asesor lo revisa y te confirma.");
             } else {
-                enviarMensaje(from, "💰 No tienes saldo pendiente. ¡Estás al día! 🎉 Un asesor puede ayudarte si tienes dudas.");
+                enviarMensaje(from, "No tienes saldo pendiente, estás al día ✅");
             }
         } else {
-            enviarMensaje(from, "💬 Un asesor revisará tu cuenta y te confirmará tu saldo. En breve te atendemos. 💜");
+            enviarMensaje(from, "Un asesor revisa tu cuenta y te confirma el saldo " + horario.cuandoTeAtendemos() + ".");
         }
         log.info("[SALDO] Consulta de saldo desde {}, requiereAsesor=true", from);
     }
@@ -1503,16 +1590,8 @@ public class WhatsAppServiceImpl implements WhatsAppService {
         }
         crearConversacionEnvio(from);
         enviarMensaje(from, """
-            Te voy a solicitar los siguientes datos para tu envío:
-
-            • Nombre completo
-            • Teléfono
-            • Cédula
-            • Dirección
-            • Ciudad
-            • Barrio
-
-            Empecemos. ¿Cuál es tu nombre completo? 📝""");
+            Para tu envío necesito: nombre, teléfono, cédula, dirección, ciudad y barrio.
+            Empecemos: ¿tu nombre completo?""");
         log.info("Iniciado flujo envío paso a paso para {}", from);
     }
 
@@ -1571,9 +1650,8 @@ public class WhatsAppServiceImpl implements WhatsAppService {
             var barrio    = datos.hasNonNull("barrio")    ? datos.get("barrio").asText()    : "";
 
             envioService.crearConDatos(from, nombre, telefono, cedula, direccion, ciudad, barrio);
-            enviarMensaje(from, """
-                ✅ ¡Gracias! Hemos recibido tus datos de envío.
-                En breve te contactaremos para coordinar la entrega.""");
+            enviarMensaje(from, "✅ Recibimos tus datos de envío.");
+            enviarResumenPedido(from);
             log.info("[ENVIO] Formulario (Flow) de envío recibido y guardado para {}", from);
         } catch (Exception e) {
             log.error("[ENVIO] No se pudo procesar la respuesta del Flow de envío de {}: {}", from, e.getMessage(), e);
@@ -1603,8 +1681,7 @@ public class WhatsAppServiceImpl implements WhatsAppService {
         conv.fotosInconveniente = new java.util.ArrayList<>();
         stateStore.put(from, conv);
         enviarMensaje(from, """
-            Lamento mucho escuchar eso. Para poder ayudarte, cuéntame con más detalle: \
-            ¿qué problema tienes con tu pedido? 📝""");
+            Lamento eso 😔 ¿Qué problema tuvo tu pedido?""");
         log.info("Iniciado flujo inconveniente para {} con descripción: {}", from, descripcionInicial);
     }
 
@@ -1624,8 +1701,7 @@ public class WhatsAppServiceImpl implements WhatsAppService {
             } else {
                 conv.paso = INC_FOTOS;
                 enviarMensaje(from, """
-                    Gracias por la información. Ahora por favor envíame las fotos del problema \
-                    (prenda dañada, faltante, etc.). 📷""");
+                    Gracias. Ahora envíame fotos del problema 📷""");
             }
         }
         log.info("Flujo inconveniente [{}] paso {}: {}", from, conv.paso, contenido);
@@ -1667,8 +1743,7 @@ public class WhatsAppServiceImpl implements WhatsAppService {
             clienteRepo.save(c);
         });
         enviarMensaje(from, """
-            ✅ Hemos registrado tu reporte (#%s). Nuestro equipo lo revisará pronto. \
-            ¡Gracias por avisarnos! 💜""".formatted(inc.getId().toString().substring(0, 8)));
+            ✅ Registramos tu reporte #%s. Lo revisamos y te contamos.""".formatted(inc.getId().toString().substring(0, 8)));
         log.info("Inconveniente creado desde {}: {} tipo=OTRO fotos={} requiereAsesor=true",
             from, inc.getId(), conv.fotosInconveniente != null ? conv.fotosInconveniente.size() : 0);
     }
@@ -1678,8 +1753,7 @@ public class WhatsAppServiceImpl implements WhatsAppService {
             from, "DANO", conv.descripcion, null, conv.fotosInconveniente);
         stateStore.remove(from);
         enviarMensaje(from, """
-            ✅ Hemos registrado tu reporte de prenda dañada (#%s). Nuestro equipo lo revisará pronto. \
-            ¡Gracias por avisarnos! 💜""".formatted(inc.getId().toString().substring(0, 8)));
+            ✅ Registramos tu reporte #%s. Lo revisamos y te contamos.""".formatted(inc.getId().toString().substring(0, 8)));
         log.info("Inconveniente creado desde {}: {} tipo=DANO fotos={}",
             from, inc.getId(), conv.fotosInconveniente != null ? conv.fotosInconveniente.size() : 0);
     }
@@ -1698,7 +1772,7 @@ public class WhatsAppServiceImpl implements WhatsAppService {
             // (valor != null solo en conversaciones que quedaron a mitad del flujo viejo).
             var texto = valor == null
                     ? "✅ ¡Listo! Guardé %s en tu baúl 🛍️".formatted(concepto)
-                    : "✅ ¡Listo! Guardé %s en tu baúl por $%d 🛍️".formatted(concepto, valor);
+                    : "✅ ¡Listo! Guardé %s en tu baúl por %s 🛍️".formatted(concepto, pesos(valor));
             enviarBotones(from, texto,
                 List.of(Map.of("id", "deshacer_" + resp.id(), "title", "↩️ Me equivoqué")),
                 conv.fotoWaMessageId);
@@ -1706,7 +1780,7 @@ public class WhatsAppServiceImpl implements WhatsAppService {
             enviarMensaje(from, "✅ Listo, apartamos %s sin precio (queda por definir). Cuando tengamos el valor te avisamos."
                     .formatted(concepto));
         } else {
-            enviarMensaje(from, "✅ ¡Listo! Apartamos %s por $%d.".formatted(concepto, valor));
+            enviarMensaje(from, "✅ ¡Listo! Apartamos %s por %s.".formatted(concepto, pesos(valor)));
         }
 
         // Si hay más prendas en cola (otras fotos que mandó mientras registrábamos esta, o
@@ -1733,8 +1807,8 @@ public class WhatsAppServiceImpl implements WhatsAppService {
         if (valor != null) {
             // Solo llega acá una conversación que quedó a mitad del flujo viejo (cuando todavía
             // se preguntaba "¿Cuánto pagaste?") antes de desplegar este cambio.
-            enviarMensaje(from, "💳 ¡Listo! Registramos tu soporte de pago por $%d. La foto quedó en tu cuenta y la revisaremos para confirmarla. 💜"
-                    .formatted(valor));
+            enviarMensaje(from, "💳 Registramos tu pago por %s. Lo revisamos y te confirmamos."
+                    .formatted(pesos(valor)));
         } else {
             confirmarAbonoFoto(from, resp.id(), conv.fotoWaMessageId);
         }
@@ -1744,7 +1818,7 @@ public class WhatsAppServiceImpl implements WhatsAppService {
     }
 
     private void confirmarAbonoFoto(String from, UUID movimientoId, String citarWaMessageId) {
-        enviarBotones(from, "💳 ¡Recibido! Guardé tu comprobante de pago. Nuestro equipo lo revisa y te confirma el abono. 💜",
+        enviarBotones(from, "💳 Recibimos tu comprobante. Lo revisamos y te confirmamos el abono.",
             List.of(Map.of("id", "deshacer_" + movimientoId, "title", "↩️ Me equivoqué")),
             citarWaMessageId);
     }
@@ -2121,27 +2195,8 @@ public class WhatsAppServiceImpl implements WhatsAppService {
     public void enviarAvisoEnviadoSinGuia(String destinatario, String nombre) {
         var nombreSaludo = (nombre == null || nombre.isBlank()) ? "" : " " + nombre;
         enviarMensaje(destinatario, """
-            📦 ¡Tu pedido ya fue enviado%s! ✅
-
-            En los próximos días te compartimos el número de guía por este mismo chat para que puedas hacerle seguimiento.
-
-            ¡Gracias por tu compra! 💜""".formatted(nombreSaludo));
+            📦 ¡Tu pedido ya salió%s! Te compartimos la guía por aquí apenas la tengamos.""".formatted(nombreSaludo));
         log.info("[ENVIO] Aviso de envío (sin guía) enviado a {}", destinatario);
-    }
-
-    @Override
-    public void enviarConfirmacionApartado(String destinatario, String nombre,
-                                           String prenda, String precio) {
-        enviarMensaje(destinatario, """
-            ✅ ¡Listo %s! Tu prenda "%s" está apartada por $%s.
-
-            Para confirmar envíanos el comprobante de pago a este mismo chat.
-
-            Datos de transferencia:
-            • Nequi: 300-xxx-xxxx
-            • Bancolombia: 123-456789-12
-
-            ¡Gracias por tu compra! 🛍️""".formatted(nombre, prenda, precio));
     }
 
     @Override

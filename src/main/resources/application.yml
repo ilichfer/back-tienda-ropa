@@ -132,6 +132,20 @@ whatsapp:
     # Minutos que el bot se queda callado con un cliente después de que alguien del equipo le
     # respondió desde la app de WhatsApp Business del celular.
     pausa-bot-minutos: ${WHATSAPP_COEXISTENCIA_PAUSA_BOT_MINUTOS:60}
+  # "App Secret" de la app de Meta (Configuración > Básica). Con él se valida la firma de cada
+  # webhook; vacío = no se valida (solo para no tumbar el webhook mientras se configura).
+  app-secret: ${WHATSAPP_APP_SECRET:}
+
+# Horario en que hay personas atendiendo el chat (lo usa el bot al pasar a un asesor).
+atencion:
+  dias: ${ATENCION_DIAS:MONDAY,TUESDAY,WEDNESDAY,THURSDAY,FRIDAY,SATURDAY}
+  hora-inicio: ${ATENCION_HORA_INICIO:08:00}
+  hora-fin: ${ATENCION_HORA_FIN:18:00}
+  zona-horaria: America/Bogota
+
+# Días sin mensajes para que un chat salga en "Chats antiguos" del panel.
+chats-antiguos:
+  dias: ${CHATS_ANTIGUOS_DIAS:45}
 
 server:
   port: 8080

@@ -53,6 +53,16 @@ public interface WaMensajeRepository extends JpaRepository<WaMensaje, UUID> {
     @Query(value = "UPDATE wa_mensajes SET created_at = :fecha WHERE id = :id", nativeQuery = true)
     int actualizarFecha(UUID id, java.time.Instant fecha);
 
+    /** Chats cuyo último mensaje es anterior a {@code limite}: [whatsapp_from, último mensaje, total]. */
+    @Query(value = "SELECT whatsapp_from, MAX(created_at) AS ultimo, COUNT(*) AS total FROM wa_mensajes " +
+                   "GROUP BY whatsapp_from HAVING MAX(created_at) < :limite ORDER BY ultimo ASC", nativeQuery = true)
+    List<Object[]> chatsSinActividadDesde(java.time.Instant limite);
+
+    // Para las notificaciones del panel: el mensaje de cliente más reciente y cuántos hay sin leer.
+    Optional<WaMensaje> findFirstByDireccionOrderByCreatedAtDesc(String direccion);
+
+    long countByDireccionAndLeidoFalse(String direccion);
+
     // Mensajes que llegaron antes de que existiera el cliente (ej. el historial se sincronizó
     // antes que los contactos): se le asignan cuando el cliente se crea.
     @Modifying

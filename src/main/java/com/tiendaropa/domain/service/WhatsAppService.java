@@ -53,8 +53,6 @@ public interface WhatsAppService {
     // envía después). No depende de IA: es siempre el mismo texto.
     void enviarAvisoEnviadoSinGuia(String destinatario, String nombre);
 
-    void enviarConfirmacionApartado(String destinatario, String nombre, String prenda, String precio);
-
     void actualizarNombreCliente(String whatsappFrom, String nombre);
 
     void borrarConversacion(String whatsappFrom);

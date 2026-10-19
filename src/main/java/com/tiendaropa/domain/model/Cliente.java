@@ -29,6 +29,13 @@ public class Cliente {
     @Builder.Default
     private Boolean requiereAsesor = false;
 
+    // Desde cuándo espera a un asesor; lo mantiene setRequiereAsesor, no se escribe a mano.
+    private Instant asesorSolicitadoEn;
+
+    // Aceptó recibir por WhatsApp el aviso del próximo live (botón "🔔 Avisarme").
+    @Builder.Default
+    private Boolean avisosLive = false;
+
     // Interruptor manual del operador: en true, el bot (IA + flujos automáticos) no
     // responde nada en esta conversación hasta que un humano lo vuelva a activar.
     // Independiente de requiereAsesor, que es una señal automática.
@@ -45,4 +52,14 @@ public class Cliente {
 
     @Column(insertable = false, updatable = false)
     private Instant updatedAt;
+
+    // requiereAsesor se marca desde varios lugares (bot, panel, ecos del celular): la hora de
+    // la espera se mantiene acá para que ninguno tenga que acordarse de ponerla.
+    public void setRequiereAsesor(Boolean requiereAsesor) {
+        var antes = Boolean.TRUE.equals(this.requiereAsesor);
+        var ahora = Boolean.TRUE.equals(requiereAsesor);
+        if (ahora && (!antes || asesorSolicitadoEn == null)) asesorSolicitadoEn = Instant.now();
+        if (!ahora) asesorSolicitadoEn = null;
+        this.requiereAsesor = requiereAsesor;
+    }
 }

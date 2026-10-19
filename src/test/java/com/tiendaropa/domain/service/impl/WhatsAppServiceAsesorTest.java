@@ -66,7 +66,8 @@ class WhatsAppServiceAsesorTest {
                 List.of(),
                 new IntentDetector(),
                 stateStore,
-                mock(CoexistenciaService.class));
+                mock(CoexistenciaService.class),
+                new com.tiendaropa.domain.service.HorarioAtencion("MONDAY,TUESDAY,WEDNESDAY,THURSDAY,FRIDAY,SATURDAY,SUNDAY", "00:00", "23:59", "America/Bogota", java.time.Clock.systemUTC()));
         ReflectionTestUtils.setField(servicio, "pausaBotMinutos", 60L);
     }
 
