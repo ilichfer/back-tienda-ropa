@@ -8,7 +8,7 @@ whatsapp:
   phone-number-id: ${WHATSAPP_PHONE_NUMBER_ID}
   access-token: ${WHATSAPP_ACCESS_TOKEN}
   verify-token: ${WHATSAPP_VERIFY_TOKEN}
-  business-account-id: ${WHATSAPP_BUSINESS_ACCOUNT_ID}
+  business-account-id: ${WHATSAPP_BUSINESS_ACCOUNT_ID:}
   media-dir: ${WHATSAPP_MEDIA_DIR:./media}
   flow-envio-id: ${WHATSAPP_FLOW_ENVIO_ID:}
 

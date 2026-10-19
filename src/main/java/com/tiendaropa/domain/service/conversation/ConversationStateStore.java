@@ -38,6 +38,11 @@ public class ConversationStateStore {
     // lo va a atender, para no repetir ese aviso en cada mensaje que mande mientras espera.
     private final ConcurrentHashMap<String, Instant> ultimoAvisoAsesor = new ConcurrentHashMap<>();
 
+    // Cuándo respondió por última vez una persona del equipo desde la app de WhatsApp Business
+    // del celular (coexistencia), para que el bot no le conteste encima a ese cliente por un
+    // rato. Vive solo en memoria: un reinicio del backend reactiva el bot, que es lo seguro.
+    private final ConcurrentHashMap<String, Instant> ultimaRespuestaHumana = new ConcurrentHashMap<>();
+
     // Serializa ConversacionCliente completo (campos sin getters incluidos) para poder
     // guardar/recuperar el estado de la conversación en la tabla wa_conversaciones.
     private static final ObjectMapper CONVERSACION_MAPPER = new ObjectMapper()
@@ -75,11 +80,20 @@ public class ConversationStateStore {
         ultimoAvisoAsesor.put(from, Instant.now());
     }
 
+    public Instant getUltimaRespuestaHumana(String from) {
+        return ultimaRespuestaHumana.get(from);
+    }
+
+    public void marcarRespuestaHumana(String from) {
+        ultimaRespuestaHumana.put(from, Instant.now());
+    }
+
     /** Limpia el estado en memoria y persistido de {@code from} por completo (borrar chat). */
     public void limpiarTodo(String from) {
         conversaciones.remove(from);
         ultimaInteraccion.remove(from);
         ultimoAvisoAsesor.remove(from);
+        ultimaRespuestaHumana.remove(from);
         if (conversacionRepo.existsById(from)) {
             conversacionRepo.deleteById(from);
         }

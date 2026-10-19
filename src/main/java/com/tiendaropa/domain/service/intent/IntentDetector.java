@@ -133,7 +133,7 @@ public class IntentDetector {
     public boolean esIntencionInconveniente(String contenido) {
         if (contenido == null) return false;
         var t = contenido.toLowerCase();
-        return t.contains("roto") || t.contains("dañado") || t.contains("danado")
+        return t.contains("roto") || t.contains("rota") || t.contains("dañado") || t.contains("danado")
                 || t.contains("imperfecto") || t.contains("imperfecta") || t.contains("mancha")
                 || t.contains("incompleto") || t.contains("incompleta") || t.contains("faltante")
                 || t.contains("mal estado") || t.contains("no llegó") || t.contains("no llego")

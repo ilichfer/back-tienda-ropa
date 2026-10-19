@@ -9,6 +9,7 @@ import com.tiendaropa.domain.repository.CuentaMovimientoRepository;
 import com.tiendaropa.domain.repository.PedidoRepository;
 import com.tiendaropa.domain.repository.SolicitudEnvioRepository;
 import com.tiendaropa.domain.repository.WaMensajeRepository;
+import com.tiendaropa.domain.service.CoexistenciaService;
 import com.tiendaropa.domain.service.CuentaService;
 import com.tiendaropa.domain.service.EnvioService;
 import com.tiendaropa.domain.service.InconvenienteService;
@@ -27,8 +28,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.client.MultipartBodyBuilder;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
-import org.springframework.web.reactive.function.BodyInserters;
-import org.springframework.web.reactive.function.client.WebClient;
+import com.tiendaropa.domain.service.whatsapp.WhatsAppCloudClient;
 
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -45,12 +45,6 @@ import java.util.concurrent.locks.ReentrantLock;
 @Slf4j
 public class WhatsAppServiceImpl implements WhatsAppService {
 
-    @Value("${whatsapp.phone-number-id}")
-    private String phoneNumberId;
-
-    @Value("${whatsapp.access-token}")
-    private String accessToken;
-
     @Value("${whatsapp.media-dir:./media}")
     private String mediaDir;
 
@@ -60,7 +54,12 @@ public class WhatsAppServiceImpl implements WhatsAppService {
     @Value("${whatsapp.flow-envio-id:}")
     private String flowEnvioId;
 
-    private final WebClient whatsappWebClient;
+    // Coexistencia: cuando alguien del equipo le responde a un cliente desde la app de WhatsApp
+    // Business del celular, el bot deja de contestarle a ese cliente por estos minutos.
+    @Value("${whatsapp.coexistencia.pausa-bot-minutos:60}")
+    private long pausaBotMinutos;
+
+    private final WhatsAppCloudClient cloud;
 
     private final WaMensajeRepository mensajeRepo;
     private final ClienteRepository   clienteRepo;
@@ -74,6 +73,7 @@ public class WhatsAppServiceImpl implements WhatsAppService {
     private final List<AgenteIA> agentesIA;
     private final IntentDetector intentDetector;
     private final ConversationStateStore stateStore;
+    private final CoexistenciaService coexistencia;
 
     @jakarta.annotation.PostConstruct
     public void init() {
@@ -118,6 +118,8 @@ public class WhatsAppServiceImpl implements WhatsAppService {
     @Async
     public void procesarWebhook(JsonNode payload) {
         try {
+            if (procesarCamposCoexistencia(payload)) return;
+
             var entry    = payload.get("entry").get(0);
             var change   = entry.get("changes").get(0).get("value");
             var messages = change.get("messages");
@@ -252,6 +254,13 @@ public class WhatsAppServiceImpl implements WhatsAppService {
                         return;
                     }
 
+                    if (atendidoDesdeElCelular(from)) {
+                        // Una persona del equipo está conversando con este cliente desde la app
+                        // del celular: el mensaje queda en el panel, pero el bot no interviene.
+                        log.info("[BOT] {} está siendo atendido desde el celular, el bot no responde", from);
+                        return;
+                    }
+
                     if (tipo.startsWith("button_")) {
                         log.info("[FLUJO] Botón detectado, procesando...");
                         procesarBoton(from, tipo, contenido, cliente);
@@ -307,6 +316,69 @@ public class WhatsAppServiceImpl implements WhatsAppService {
         } catch (Exception e) {
             log.error("Error procesando webhook WA", e);
         }
+    }
+
+    /**
+     * Webhooks propios de la coexistencia (número usado a la vez en la app del celular y en la
+     * API). Devuelve true si el payload era de ese tipo y ya se procesó, para que procesarWebhook
+     * no lo trate como un mensaje entrante normal.
+     */
+    private boolean procesarCamposCoexistencia(JsonNode payload) {
+        var procesado = false;
+        for (var entry : payload.path("entry")) {
+            for (var cambio : entry.path("changes")) {
+                var campo = cambio.path("field").asText("");
+                var value = cambio.path("value");
+                try {
+                    switch (campo) {
+                        case "history" -> {
+                            coexistencia.procesarHistorial(value);
+                            procesado = true;
+                        }
+                        case "smb_app_state_sync" -> {
+                            coexistencia.procesarContactos(value);
+                            procesado = true;
+                        }
+                        case "smb_message_echoes" -> {
+                            for (var eco : value.path("message_echoes")) {
+                                registrarRespuestaDesdeCelular(eco);
+                            }
+                            procesado = true;
+                        }
+                        default -> { }
+                    }
+                } catch (Exception e) {
+                    log.error("[COEXISTENCIA] Error procesando webhook '{}'", campo, e);
+                    procesado = true;
+                }
+            }
+        }
+        return procesado;
+    }
+
+    /**
+     * Alguien del equipo le respondió a un cliente desde la app del celular. Se guarda en el panel
+     * y, con el mismo candado que usan los mensajes del cliente, se pausa el bot para ese número y
+     * se descarta cualquier flujo que el bot tuviera a medias: lo está atendiendo una persona.
+     */
+    private void registrarRespuestaDesdeCelular(JsonNode eco) {
+        var numeroCliente = coexistencia.registrarEco(eco);
+        if (numeroCliente == null) return;
+        var candado = candadosPorNumero.computeIfAbsent(numeroCliente, k -> new ReentrantLock());
+        candado.lock();
+        try {
+            stateStore.recuperarSiNecesario(numeroCliente);
+            stateStore.marcarRespuestaHumana(numeroCliente);
+            stateStore.remove(numeroCliente);
+            stateStore.persistir(numeroCliente);
+        } finally {
+            candado.unlock();
+        }
+    }
+
+    private boolean atendidoDesdeElCelular(String from) {
+        var ultima = stateStore.getUltimaRespuestaHumana(from);
+        return ultima != null && ChronoUnit.MINUTES.between(ultima, Instant.now()) < pausaBotMinutos;
     }
 
     // Un objeto de "statuses" del webhook luce como:
@@ -1064,27 +1136,8 @@ public class WhatsAppServiceImpl implements WhatsAppService {
     private byte[] descargarMediaBytes(String mediaId) {
         if (mediaId == null || mediaId.isBlank()) return null;
         try {
-            var metaUrl = java.net.URI.create("https://graph.facebook.com/v19.0/" + mediaId + "?fields=url,mime_type");
-            var conn = (java.net.HttpURLConnection) metaUrl.toURL().openConnection();
-            conn.setRequestProperty("Authorization", "Bearer " + accessToken);
-            conn.setConnectTimeout(10000);
-            conn.setReadTimeout(10000);
-            var meta = new com.fasterxml.jackson.databind.ObjectMapper().readTree(conn.getInputStream());
-            var urlStr = meta.has("url") ? meta.get("url").asText() : null;
-            if (urlStr == null) return null;
-
-            var dlConn = (java.net.HttpURLConnection) java.net.URI.create(urlStr).toURL().openConnection();
-            dlConn.setRequestProperty("Authorization", "Bearer " + accessToken);
-            dlConn.setInstanceFollowRedirects(true);
-            dlConn.setConnectTimeout(15000);
-            dlConn.setReadTimeout(30000);
-            var in = dlConn.getInputStream();
-            var buf = new java.io.ByteArrayOutputStream();
-            var tmp = new byte[8192];
-            int n;
-            while ((n = in.read(tmp)) != -1) buf.write(tmp, 0, n);
-            in.close();
-            return buf.toByteArray();
+            var media = cloud.descargarMedia(mediaId);
+            return media == null ? null : media.bytes();
         } catch (Exception e) {
             log.warn("No se pudo descargar bytes de media {}: {}", mediaId, e.getMessage());
             return null;
@@ -1458,19 +1511,13 @@ public class WhatsAppServiceImpl implements WhatsAppService {
         );
 
         try {
-            var r = whatsappWebClient.post()
-                .uri("/{phoneId}/messages", phoneNumberId)
-                .header("Authorization", "Bearer " + accessToken)
-                .bodyValue(body)
-                .retrieve()
-                .bodyToMono(JsonNode.class)
-                .block();
+            var waMessageId = cloud.enviarMensajeYObtenerId(body);
             mensajeRepo.save(WaMensaje.builder()
                     .whatsappFrom(destinatario)
                     .contenido("[Formulario de datos de envío enviado]")
                     .tipo("interactive")
                     .direccion("SALIDA")
-                    .waMessageId(r.get("messages").get(0).get("id").asText())
+                    .waMessageId(waMessageId)
                     .build());
             log.info("[ENVIO] Flow de datos de envío enviado a {}", destinatario);
         } catch (Exception e) {
@@ -1749,26 +1796,10 @@ public class WhatsAppServiceImpl implements WhatsAppService {
             return null;
         }
         try {
-            var meta = whatsappWebClient.get()
-                .uri("/{mediaId}", mediaId)
-                .header("Authorization", "Bearer " + accessToken)
-                .retrieve()
-                .bodyToMono(JsonNode.class)
-                .block();
-            var urlStr = meta.has("url") ? meta.get("url").asText() : null;
-            if (urlStr == null) {
-                log.warn("[MEDIA] Meta no devolvió 'url' al consultar metadata de {}: {}", mediaId, meta);
-                return null;
-            }
-            var mime = meta.has("mime_type") ? meta.get("mime_type").asText() : "image/jpeg";
-
-            var bytes = whatsappWebClient.get()
-                .uri(urlStr)
-                .header("Authorization", "Bearer " + accessToken)
-                .retrieve()
-                .bodyToMono(byte[].class)
-                .block();
-            return guardarMediaLocal(bytes, mime);
+            var media = cloud.descargarMedia(mediaId);
+            if (media == null) return null;
+            var mime = media.mimeType() != null ? media.mimeType() : "image/jpeg";
+            return guardarMediaLocal(media.bytes(), mime);
         } catch (Exception e) {
             log.warn("No se pudo descargar media {} local: {}", mediaId, e.getMessage());
             return null;
@@ -1843,20 +1874,14 @@ public class WhatsAppServiceImpl implements WhatsAppService {
         }
 
         try {
-            var r = whatsappWebClient.post()
-                .uri("/{phoneId}/messages", phoneNumberId)
-                .header("Authorization", "Bearer " + accessToken)
-                .bodyValue(body)
-                .retrieve()
-                .bodyToMono(JsonNode.class)
-                .block();
+            var waMessageId = cloud.enviarMensajeYObtenerId(body);
 
             mensajeRepo.save(WaMensaje.builder()
                     .whatsappFrom(destinatario)
                     .contenido(texto)
                     .tipo("text")
                     .direccion("SALIDA")
-                    .waMessageId(r.get("messages").get(0).get("id").asText())
+                    .waMessageId(waMessageId)
                     .contextWaMessageId(citando ? replyToWaMessageId : null)
                     .build());
         } catch (Exception e) {
@@ -1894,13 +1919,7 @@ public class WhatsAppServiceImpl implements WhatsAppService {
         }
 
         try {
-            var r = whatsappWebClient.post()
-                .uri("/{phoneId}/messages", phoneNumberId)
-                .header("Authorization", "Bearer " + accessToken)
-                .bodyValue(body)
-                .retrieve()
-                .bodyToMono(JsonNode.class)
-                .block();
+            var waMessageId = cloud.enviarMensajeYObtenerId(body);
 
             var titulos = botones.stream().map(b -> b.get("title")).reduce((a, b1) -> a + " | " + b1).orElse("");
             mensajeRepo.save(WaMensaje.builder()
@@ -1908,7 +1927,7 @@ public class WhatsAppServiceImpl implements WhatsAppService {
                     .contenido(texto + "\n[" + titulos + "]")
                     .tipo("interactive")
                     .direccion("SALIDA")
-                    .waMessageId(r.get("messages").get(0).get("id").asText())
+                    .waMessageId(waMessageId)
                     .contextWaMessageId(citando ? replyToWaMessageId : null)
                     .build());
         } catch (Exception e) {
@@ -1943,16 +1962,7 @@ public class WhatsAppServiceImpl implements WhatsAppService {
             )
         );
 
-        whatsappWebClient.post()
-            .uri("/{phoneId}/messages", phoneNumberId)
-            .header("Authorization", "Bearer " + accessToken)
-            .bodyValue(body)
-            .retrieve()
-            .bodyToMono(JsonNode.class)
-            .subscribe(
-                r -> log.info("Plantilla envío enviada a {}", destinatario),
-                e -> log.error("Error enviando plantilla", e)
-            );
+        cloud.enviarMensajeSinEsperar(body, "plantilla de envío a " + destinatario);
     }
 
     @Override
@@ -1977,15 +1987,7 @@ public class WhatsAppServiceImpl implements WhatsAppService {
         );
 
         try {
-            var r = whatsappWebClient.post()
-                .uri("/{phoneId}/messages", phoneNumberId)
-                .header("Authorization", "Bearer " + accessToken)
-                .bodyValue(body)
-                .retrieve()
-                .bodyToMono(JsonNode.class)
-                .block();
-
-            var waMessageId = r.get("messages").get(0).get("id").asText();
+            var waMessageId = cloud.enviarMensajeYObtenerId(body);
             mensajeRepo.save(WaMensaje.builder()
                     .whatsappFrom(destinatario)
                     .contenido("[Plantilla: " + nombrePlantilla + "] " + String.join(" · ", valoresVariables))
@@ -2020,15 +2022,7 @@ public class WhatsAppServiceImpl implements WhatsAppService {
                 }
             }).contentType(MediaType.parseMediaType(mimeFinal));
 
-            var subida = whatsappWebClient.post()
-                .uri("/{phoneId}/media", phoneNumberId)
-                .header("Authorization", "Bearer " + accessToken)
-                .contentType(MediaType.MULTIPART_FORM_DATA)
-                .body(BodyInserters.fromMultipartData(multipart.build()))
-                .retrieve()
-                .bodyToMono(JsonNode.class)
-                .block();
-            var mediaIdSalida = subida.get("id").asText();
+            var mediaIdSalida = cloud.subirMedia(multipart.build());
 
             // Paso 2: mandar el mensaje de imagen referenciando ese id recién subido.
             var imageBody = new java.util.LinkedHashMap<String, Object>();
@@ -2042,14 +2036,7 @@ public class WhatsAppServiceImpl implements WhatsAppService {
                 "image", imageBody
             );
 
-            var r = whatsappWebClient.post()
-                .uri("/{phoneId}/messages", phoneNumberId)
-                .header("Authorization", "Bearer " + accessToken)
-                .bodyValue(body)
-                .retrieve()
-                .bodyToMono(JsonNode.class)
-                .block();
-            var waMessageId = r.get("messages").get(0).get("id").asText();
+            var waMessageId = cloud.enviarMensajeYObtenerId(body);
 
             // Se guarda una copia local (mismo patrón que guardarMediaLocal) para que la
             // imagen reenviada quede visible de inmediato en el panel sin depender de que

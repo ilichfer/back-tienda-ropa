@@ -120,5 +120,14 @@ agente-ia:
     model: gemini-2.5-flash
     base-url: https://generativelanguage.googleapis.com
 
+whatsapp:
+  # Versión de la Graph API de Meta. v19.0 se retiró el 21-may-2026; v25.0 está disponible
+  # hasta julio de 2028. Se puede cambiar por variable de entorno sin recompilar.
+  graph-api-version: ${WHATSAPP_GRAPH_API_VERSION:v25.0}
+  coexistencia:
+    # Minutos que el bot se queda callado con un cliente después de que alguien del equipo le
+    # respondió desde la app de WhatsApp Business del celular.
+    pausa-bot-minutos: ${WHATSAPP_COEXISTENCIA_PAUSA_BOT_MINUTOS:60}
+
 server:
   port: 8080

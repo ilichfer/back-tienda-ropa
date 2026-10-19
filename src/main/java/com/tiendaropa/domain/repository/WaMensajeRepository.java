@@ -44,4 +44,19 @@ public interface WaMensajeRepository extends JpaRepository<WaMensaje, UUID> {
     @Transactional
     @Query("DELETE FROM WaMensaje m WHERE m.whatsappFrom = :whatsappFrom")
     int deleteByWhatsappFrom(String whatsappFrom);
+
+    // created_at lo pone la base (DEFAULT now()) y la entidad no lo deja escribir. Los mensajes
+    // del historial de WhatsApp Business llegan días o meses después de enviados, así que se
+    // corrige su fecha a la original para que el chat quede en orden.
+    @Modifying
+    @Transactional
+    @Query(value = "UPDATE wa_mensajes SET created_at = :fecha WHERE id = :id", nativeQuery = true)
+    int actualizarFecha(UUID id, java.time.Instant fecha);
+
+    // Mensajes que llegaron antes de que existiera el cliente (ej. el historial se sincronizó
+    // antes que los contactos): se le asignan cuando el cliente se crea.
+    @Modifying
+    @Transactional
+    @Query("UPDATE WaMensaje m SET m.cliente = :cliente WHERE m.whatsappFrom = :whatsappFrom AND m.cliente IS NULL")
+    int vincularCliente(com.tiendaropa.domain.model.Cliente cliente, String whatsappFrom);
 }

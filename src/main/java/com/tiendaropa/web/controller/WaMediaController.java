@@ -1,6 +1,7 @@
 package com.tiendaropa.web.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.tiendaropa.domain.service.whatsapp.WhatsAppCloudClient;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.FileSystemResource;
@@ -26,12 +27,14 @@ public class WaMediaController {
 
     private final String accessToken;
     private final String mediaDir;
+    private final WhatsAppCloudClient cloud;
     private final ObjectMapper mapper = new ObjectMapper();
 
     public WaMediaController(
-            @Value("${whatsapp.access-token}") String accessToken,
+            WhatsAppCloudClient cloud,
             @Value("${whatsapp.media-dir:./media}") String mediaDir) {
-        this.accessToken = accessToken;
+        this.cloud = cloud;
+        this.accessToken = cloud.accessToken();
         this.mediaDir = mediaDir;
     }
 
@@ -61,7 +64,7 @@ public class WaMediaController {
     @GetMapping("/{mediaId}")
     public ResponseEntity<byte[]> descargar(@PathVariable String mediaId) {
         try {
-            var metaUrl = URI.create("https://graph.facebook.com/v19.0/" + mediaId + "?fields=url,mime_type");
+            var metaUrl = URI.create(cloud.urlMetadataMedia(mediaId));
             var conn = (HttpURLConnection) metaUrl.toURL().openConnection();
             conn.setRequestProperty("Authorization", "Bearer " + accessToken);
             conn.setConnectTimeout(10000);
