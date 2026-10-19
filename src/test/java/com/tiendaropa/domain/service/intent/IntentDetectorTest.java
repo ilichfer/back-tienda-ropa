@@ -56,6 +56,22 @@ class IntentDetectorTest {
         assertThat(detector.esIntencionHorarioLive("me gustó el live")).isFalse();
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "quiero hablar con un asesor",
+            "Me comunicas con una ASESORA?",
+            "necesito hablar con una persona",
+            "no quiero hablar con un bot",
+    })
+    void pedirUnaPersona(String mensaje) {
+        assertThat(detector.esIntencionHablarConAsesor(mensaje)).isTrue();
+    }
+
+    @Test
+    void preguntarPorUnaPrendaNoEsPedirAsesor() {
+        assertThat(detector.esIntencionHablarConAsesor("tienen esta blusa en talla M?")).isFalse();
+    }
+
     @Test
     void textoNuloNuncaEsUnaIntencion() {
         assertThat(detector.esIntencionEnvio(null)).isFalse();

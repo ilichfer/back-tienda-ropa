@@ -99,6 +99,9 @@ public class WaMensajeController {
         var cliente = clienteRepo.findByWhatsapp(whatsappFrom).orElse(null);
         if (cliente != null) {
             cliente.setBotSilenciado(silenciado);
+            // Reactivar el bot es la señal de que el asesor ya terminó: si quedara "requiere
+            // asesor", el bot volvería solo a repetir "ya un asesor está al tanto de tu caso".
+            if (!silenciado) cliente.setRequiereAsesor(false);
             clienteRepo.save(cliente);
             log.info("[BOT] {} el bot para {}", silenciado ? "Silenciado" : "Reactivado", whatsappFrom);
         }

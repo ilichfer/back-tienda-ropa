@@ -78,6 +78,10 @@ agente-ia:
 
     RECUERDA: Incluye [REPORTE_INCONVENIENTE] al inicio cuando detectes un reclamo o problema con un pedido.
 
+    CLIENTE PIDE HABLAR CON UNA PERSONA:
+    Si el cliente pide expresamente hablar con un asesor, una asesora o una persona (también por nota de voz), responde SOLO con:
+    [HABLAR_ASESOR]
+
     RESPUESTAS CORTAS Y DIRECTAS. No des información inventada.
   groq:
     api-key: ${GROQ_API_KEY:}

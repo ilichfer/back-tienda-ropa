@@ -261,6 +261,14 @@ public class WhatsAppServiceImpl implements WhatsAppService {
                         return;
                     }
 
+                    // Va antes que cualquier flujo, la IA o el saludo de bienvenida: si el cliente
+                    // pide una persona, el bot no debe contestarle nada más (ni aunque esté a mitad
+                    // de un flujo de envío o de apartar).
+                    if ((tipo.equals("text") || tipo.equals("image")) && intentDetector.esIntencionHablarConAsesor(contenido)) {
+                        pasarAAsesor(from);
+                        return;
+                    }
+
                     if (tipo.startsWith("button_")) {
                         log.info("[FLUJO] Botón detectado, procesando...");
                         procesarBoton(from, tipo, contenido, cliente);
@@ -376,6 +384,25 @@ public class WhatsAppServiceImpl implements WhatsAppService {
         }
     }
 
+    /**
+     * El cliente pidió hablar con una persona (botón, texto o nota de voz). Se le avisa una sola
+     * vez y el bot queda silenciado para ese número: ni IA, ni flujos, ni saludos, ni avisos de
+     * "ya un asesor está al tanto". Solo un asesor lo reactiva desde el panel (silenciar-bot).
+     */
+    private void pasarAAsesor(String from) {
+        stateStore.remove(from);
+        var cliente = clienteRepo.findByWhatsapp(from)
+                .orElseGet(() -> clienteRepo.save(Cliente.builder().whatsapp(from).build()));
+        cliente.setRequiereAsesor(true);
+        cliente.setBotSilenciado(true);
+        clienteRepo.save(cliente);
+        // Si el número es nuevo, sus mensajes se guardaron sin cliente y el panel no vería que
+        // el bot quedó silenciado.
+        mensajeRepo.vincularCliente(cliente, from);
+        enviarMensaje(from, "💬 Te comunico con un asesor. En breve una persona de nuestro equipo te atiende por este mismo chat 💜");
+        log.info("[ASESOR] {} pidió hablar con un asesor: bot silenciado hasta que lo reactiven desde el panel", from);
+    }
+
     private boolean atendidoDesdeElCelular(String from) {
         var ultima = stateStore.getUltimaRespuestaHumana(from);
         return ultima != null && ChronoUnit.MINUTES.between(ultima, Instant.now()) < pausaBotMinutos;
@@ -424,15 +451,7 @@ public class WhatsAppServiceImpl implements WhatsAppService {
                 stateStore.remove(from);
                 iniciarFlujoPedidoTexto(from);
             }
-            case "button_asesora" -> {
-                stateStore.remove(from);
-                clienteRepo.findByWhatsapp(from).ifPresent(c -> {
-                    c.setRequiereAsesor(true);
-                    clienteRepo.save(c);
-                });
-                enviarMensaje(from, """
-                    Te comunicaré con una asesora. Por favor espera, en breve te atenderemos.""");
-            }
+            case "button_asesora" -> pasarAAsesor(from);
             // Al guardar en baúl o registrar un pago con foto ya NO se le pregunta el valor al
             // cliente (tomaba tiempo y confundía): el cargo queda "valor por definir" y el abono
             // "por validar", y el operador pone el valor desde el panel de Cuentas.
@@ -866,6 +885,12 @@ public class WhatsAppServiceImpl implements WhatsAppService {
                 var texto = corregirNumeroPago(respuesta.get());
                 log.info("[IA] {} respondió: '{}'", agente.nombre(), texto.substring(0, Math.min(100, texto.length())));
 
+                if (texto.contains("[HABLAR_ASESOR]")) {
+                    log.info("[IA] El cliente pidió hablar con un asesor");
+                    pasarAAsesor(from);
+                    return true;
+                }
+
                 if (texto.contains("[SOLICITAR_ENVIO]")) {
                     log.info("[IA] Detectada solicitud de envío, iniciando flujo ENVIO");
                     var mensajeLimpio = texto.replace("[SOLICITAR_ENVIO]", "").trim();
@@ -1094,6 +1119,10 @@ public class WhatsAppServiceImpl implements WhatsAppService {
                     var texto = corregirNumeroPago(respuesta.get());
                     log.info("[IA] {} interpretó el audio: '{}'", agente.nombre(), texto.substring(0, Math.min(100, texto.length())));
 
+                    if (texto.contains("[HABLAR_ASESOR]")) {
+                        pasarAAsesor(from);
+                        return;
+                    }
                     if (texto.contains("[SOLICITAR_ENVIO]")) {
                         var mensajeLimpio = texto.replace("[SOLICITAR_ENVIO]", "").trim();
                         enviarMensaje(from, mensajeLimpio);

@@ -268,6 +268,20 @@ public class IntentDetector {
                 || t.contains("prenda");
     }
 
+    // El cliente pide expresamente hablar con una persona. A diferencia de los otros casos que
+    // marcan "requiere asesor" (precio, saldo, reclamo), acá el bot se silencia por completo
+    // hasta que un asesor lo reactive desde el panel. Por eso basta con mencionar "asesor": si el
+    // cliente lo nombra, es más seguro dejarlo con una persona que seguir contestándole el bot.
+    public boolean esIntencionHablarConAsesor(String contenido) {
+        if (contenido == null) return false;
+        var t = contenido.toLowerCase();
+        return t.contains("asesor")
+                || t.contains("hablar con alguien") || t.contains("hablar con una persona")
+                || t.contains("persona real") || t.contains("un humano") || t.contains("una persona de verdad")
+                || t.contains("no quiero hablar con un bot") || t.contains("no quiero hablar con el bot")
+                || t.contains("no quiero bot") || t.contains("atención humana") || t.contains("atencion humana");
+    }
+
     public boolean esNoSe(String contenido) {
         if (contenido == null) return false;
         var t = contenido.toLowerCase().trim();
